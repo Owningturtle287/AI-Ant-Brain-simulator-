@@ -22,6 +22,7 @@ try {
   await desktop.goto(url, { waitUntil: 'commit' });
   await desktop.locator('canvas').waitFor();
   assert.equal(await desktop.locator('#render-mode').isVisible(), false, 'WebGL renderer should be active');
+  assert.equal(await desktop.locator('canvas').evaluate(canvas => Boolean(canvas.getContext('webgl2'))), true);
   await mkdir('browser-results', { recursive: true });
   await desktop.screenshot({ path: 'browser-results/desktop.png', timeout: 25_000 });
   console.log('Desktop WebGL rendered');
@@ -59,7 +60,7 @@ try {
   await mobile.goto(url, { waitUntil: 'commit' });
   await mobile.locator('canvas').waitFor();
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth), 390);
-  assert.equal(await mobile.locator('#render-mode').innerText(), 'Compatibility view');
+  assert.equal(await mobile.locator('#render-mode').isVisible(), true, 'The compatibility renderer should be labeled');
   await mobile.screenshot({ path: 'browser-results/phone.png', fullPage: true });
   await mobile.waitForFunction(() => navigator.serviceWorker.controller !== null);
   await phone.setOffline(true);

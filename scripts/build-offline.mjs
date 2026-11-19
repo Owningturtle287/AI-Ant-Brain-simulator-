@@ -20,6 +20,8 @@ const cacheName = prefix + '${version}';
 const assets = ${JSON.stringify(['./', ...files.map(path => './' + path)])};
 const urls = new Set(assets.map(path => new URL(path, scope).href));
 const home = new URL('index.html', scope).href;
+const homePath = new URL(home).pathname;
+const scopePath = new URL(scope).pathname;
 
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
@@ -39,12 +41,23 @@ self.addEventListener('fetch', event => {
   const request = event.request;
   if (request.method !== 'GET' || !request.url.startsWith(scope)) return;
   const url = new URL(request.url);
-  if (request.mode === 'navigate' && (url.pathname === new URL(scope).pathname || url.pathname === new URL(home).pathname)) {
-    event.respondWith(cacheOrFetch(home, request));
+  if (request.mode === 'navigate' && (url.pathname === scopePath || url.pathname === homePath)) {
+    event.respondWith(networkPage(request));
   } else if (urls.has(request.url)) {
     event.respondWith(cacheOrFetch(request.url, request));
   }
 });
+
+async function networkPage(request) {
+  try {
+    const response = await fetch(request, { cache: 'no-cache' });
+    if (response.ok) return response;
+  } catch {
+    // The cached shell is used when the network is unreachable.
+  }
+  const cache = await caches.open(cacheName);
+  return (await cache.match(home, { ignoreVary: true })) || Response.error();
+}
 
 async function cacheOrFetch(url, request) {
   const cache = await caches.open(cacheName);

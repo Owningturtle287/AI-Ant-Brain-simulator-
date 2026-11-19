@@ -134,6 +134,8 @@ const gaster = profile([
   return .76 + .51 * peak(x + .10, .24) + .18 * Math.max(0, -Math.cos(angle)) - seam + rim;
 });
 
+gaster.seams = [-.596, -.739, -.856];
+
 const mandible = profile([
   [0, .038, -.039, .040, .8, 0],
   [.040, .054, -.066, .062, .72, .008],
@@ -242,6 +244,13 @@ export function sculpt(definition, radial = 20, axial = 34) {
     normals.setXYZ(start, seam.x, seam.y, seam.z);
     normals.setXYZ(end, seam.x, seam.y, seam.z);
   }
-  geometry.userData.profile = { rows: rows.length, radial };
+  const seamRows = (definition.seams ?? []).map(x => {
+    let nearest = 0;
+    for (let row = 1; row < rows.length; row++) {
+      if (Math.abs(rows[row] - x) < Math.abs(rows[nearest] - x)) nearest = row;
+    }
+    return nearest;
+  });
+  geometry.userData.profile = { rows: rows.length, radial, seamRows };
   return geometry;
 }

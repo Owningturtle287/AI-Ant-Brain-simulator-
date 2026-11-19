@@ -126,6 +126,22 @@ export class SoftwareView {
     return [...edges.map(edge => edge[0]), ...edges.map(edge => edge[1]).reverse()];
   }
 
+  seams(mesh) {
+    const { radial, seamRows } = mesh.geometry.userData.profile;
+    const position = mesh.geometry.getAttribute('position');
+    return seamRows.map(row => {
+      const ring = [];
+      let near = 0;
+      for (let index = 0; index < radial; index++) {
+        nearEnd.fromBufferAttribute(position, row * (radial + 1) + index).applyMatrix4(mesh.matrixWorld).applyMatrix4(transform);
+        ring.push({ point: this.screen(nearEnd), depth: nearEnd.z });
+        if (ring[near].depth > nearEnd.z) near = index;
+      }
+      return Array.from({ length: Math.ceil(radial * .49) }, (_, index) =>
+        ring[(near - Math.floor(radial * .24) + index + radial) % radial].point);
+    });
+  }
+
   sceneShapes(scene, camera) {
     const shapes = [];
     scene.traverseVisible(mesh => {
@@ -150,7 +166,11 @@ export class SoftwareView {
       const scale = this.height / (2 * Math.tan(camera.fov * Math.PI / 360) * distance);
       if (sculpted) {
         const silhouette = this.silhouette(mesh);
-        if (silhouette.length > 2) shapes.push({ silhouette, screen, color, depth, eye: Boolean(geometry.userData.oval) });
+        if (silhouette.length > 2) {
+          const profile = geometry.userData.profile;
+          shapes.push({ silhouette, screen, color, depth, eye: !profile,
+            seams: profile?.seamRows.length ? this.seams(mesh) : [] });
+        }
       } else if (geometry.type === 'CylinderGeometry') {
         const first = this.screen(this.position(nearEnd, 0, -.5, 0, mesh.matrixWorld).applyMatrix4(transform));
         const last = this.screen(this.position(farEnd, 0, .5, 0, mesh.matrixWorld).applyMatrix4(transform));
@@ -225,22 +245,49 @@ export class SoftwareView {
     const ctx = this.context;
     if (shape.silhouette) {
       const [first, ...edge] = shape.silhouette;
+      ctx.save();
       ctx.beginPath();
       ctx.moveTo(...first);
-      let top = first[1], bottom = top;
+      let left = first[0], right = left, top = first[1], bottom = top;
       for (const point of edge) {
         ctx.lineTo(...point);
+        left = Math.min(left, point[0]);
+        right = Math.max(right, point[0]);
         top = Math.min(top, point[1]);
         bottom = Math.max(bottom, point[1]);
       }
       ctx.closePath();
-      const shade = ctx.createLinearGradient(0, top, 0, Math.max(top + 1, bottom));
-      shade.addColorStop(0, tint(shape.color, shape.eye ? .09 : .24));
-      shade.addColorStop(.32, tint(shape.color, shape.eye ? .035 : .10));
-      shade.addColorStop(.72, tint(shape.color, -.17));
-      shade.addColorStop(1, tint(shape.color, -.48));
+      ctx.clip();
+      const width = Math.max(1, right - left);
+      const height = Math.max(1, bottom - top);
+      ctx.save();
+      ctx.translate(left, top);
+      ctx.scale(width, height);
+      const shade = ctx.createRadialGradient(.37, .23, 0, .49, .40, .68);
+      shade.addColorStop(0, tint(shape.color, shape.eye ? .10 : .36));
+      shade.addColorStop(.33, tint(shape.color, shape.eye ? .025 : .16));
+      shade.addColorStop(.69, tint(shape.color, -.12));
+      shade.addColorStop(1, tint(shape.color, -.47));
       ctx.fillStyle = shade;
-      ctx.fill();
+      ctx.fillRect(0, 0, 1, 1);
+      if (!shape.eye && width > 17 && height > 14) {
+        const glint = ctx.createRadialGradient(.32, .20, .007, .32, .24, .27);
+        glint.addColorStop(0, '#fff1d867');
+        glint.addColorStop(.32, '#fce7cd27');
+        glint.addColorStop(1, '#ffe3bd00');
+        ctx.fillStyle = glint;
+        ctx.fillRect(0, 0, 1, 1);
+      }
+      ctx.restore();
+      for (const seam of shape.seams) {
+        ctx.beginPath();
+        ctx.moveTo(...seam[0]);
+        for (const point of seam.slice(1)) ctx.lineTo(...point);
+        ctx.strokeStyle = '#130e0d80';
+        ctx.lineWidth = 1.55;
+        ctx.stroke();
+      }
+      ctx.restore();
       return;
     }
     if (shape.first || shape.path) {

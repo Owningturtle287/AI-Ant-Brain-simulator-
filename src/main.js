@@ -91,6 +91,8 @@ function setPaused(arena, paused) {
 }
 
 function controls(arena) {
+  $('render-mode').hidden = !arena.software;
+  $('quality').disabled = arena.software;
   const play = $('play');
   play.addEventListener('click', () => setPaused(arena, !arena.flags.paused));
   $('reset').addEventListener('click', () => arena.reset());
@@ -162,7 +164,12 @@ try {
 }
 
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js').catch(error => console.warn('Offline setup failed.', error));
+  window.addEventListener('load', async () => {
+    try {
+      const registration = await navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' });
+      if (navigator.onLine) await registration.update();
+    } catch (error) {
+      if (navigator.onLine) console.warn('Offline setup failed.', error);
+    }
   });
 }
