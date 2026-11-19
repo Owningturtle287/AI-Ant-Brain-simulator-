@@ -139,7 +139,7 @@ export class Arena {
       const studio = new RoomEnvironment();
       const generator = new THREE.PMREMGenerator(this.renderer);
       this.scene.environment = generator.fromScene(studio, .08).texture;
-      this.scene.environmentIntensity = .63;
+      this.scene.environmentIntensity = .86;
       studio.dispose();
       generator.dispose();
     }
@@ -153,8 +153,8 @@ export class Arena {
     this.sun.shadow.normalBias = .025;
     this.sun.shadow.bias = -.00016;
     this.scene.add(this.sun, this.sun.target);
-    const bounce = new THREE.DirectionalLight('#e0e5f7', .80);
-    bounce.position.set(-3, 3, 4);
+    const bounce = new THREE.DirectionalLight('#f9ecde', 1.55);
+    bounce.position.set(-2.7, 3.5, 4.7);
     this.scene.add(bounce);
 
     this.terrain = makeTerrain(this.scene, this.renderer);

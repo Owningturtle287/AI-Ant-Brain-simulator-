@@ -68,13 +68,13 @@ function facets() {
 function materials() {
   const maps = cuticle();
   const shell = (color, roughness, bumpScale) => new THREE.MeshPhysicalMaterial({
-    color, roughness, ...maps, bumpScale, clearcoat: .35, clearcoatRoughness: .26, vertexColors: true,
+    color, roughness, ...maps, bumpScale: bumpScale * .34, clearcoat: .58, clearcoatRoughness: .20, vertexColors: true,
   });
   return {
-    mesosoma: shell('#883d22', .36, .017),
-    head: shell('#8a3d22', .35, .016),
+    mesosoma: shell('#883d22', .32, .017),
+    head: shell('#8a3d22', .31, .016),
     waist: shell('#77351e', .32, .014),
-    gaster: shell('#321918', .30, .015),
+    gaster: shell('#321918', .27, .015),
     femur: shell('#8f4a2c', .39, .011),
     tibia: shell('#995331', .38, .010),
     hinge: shell('#65301c', .39, .010),
