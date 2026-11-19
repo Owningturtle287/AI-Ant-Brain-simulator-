@@ -25,6 +25,13 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+      - run: npx playwright install chromium --with-deps
+      - run: npm run test:browser
+      - uses: actions/upload-artifact@v6
+        with:
+          name: browser-screenshots
+          path: browser-results
+          retention-days: 7
       - uses: actions/upload-pages-artifact@v4
         with:
           path: dist

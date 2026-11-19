@@ -57,6 +57,8 @@ h1 { font-weight: 640; letter-spacing: -.052em; font-size: clamp(33px, 4vw, 54px
 .stage-overlay button, .guide-tools button { pointer-events: auto; }
 .status-chip, .view-tools, .guide-tools button, #arena-hint { border: 1px solid #8c7b6c63; background: #171a17eb; color: var(--text); border-radius: 8px; }
 .status-chip { display: inline-flex; align-items: center; gap: 7px; padding: 9px 10px; white-space: nowrap; font-size: 11px; }
+.stage-state { display: grid; justify-items: start; gap: 4px; }
+#render-mode { color: #f5e3cc; background: #23231fdd; border-radius: 4px; font-size: 10px; padding: 3px 5px; }
 .status-chip span { background: var(--green); width: 6px; height: 6px; border-radius: 50%; box-shadow: 0 0 9px #abd4a36b; }
 .status-chip[data-paused="true"] span { background: var(--accent); box-shadow: none; }
 .view-tools { display: flex; padding: 3px; }

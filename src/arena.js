@@ -3,6 +3,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { arenaLimit, AntMotion, terrainHeight } from './motion.js';
 import { randomGenerator, WorkerRig } from './worker.js';
+import { SoftwareView } from './software-view.js';
 
 const origin = new THREE.Vector3();
 const terrainColors = { loam: '#94775a', gravel: '#8d8172', tunnel: '#826a4f' };
@@ -87,7 +88,10 @@ export class Arena {
     this.scene.background = new THREE.Color('#2a221b');
     this.scene.fog = new THREE.FogExp2('#2b241d', .051);
     this.camera = new THREE.PerspectiveCamera(36, 1, .07, 72);
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    const surface = document.createElement('canvas');
+    const context = surface.getContext('webgl2', { antialias: true, alpha: false });
+    this.software = !context;
+    this.renderer = context ? new THREE.WebGLRenderer({ canvas: surface, context }) : new SoftwareView();
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.24;
     this.renderer.shadowMap.enabled = true;
@@ -108,12 +112,14 @@ export class Arena {
     this.orbit.maxDistance = 16.5;
     this.orbit.rotateSpeed = .74;
 
-    const studio = new RoomEnvironment();
-    const generator = new THREE.PMREMGenerator(this.renderer);
-    this.scene.environment = generator.fromScene(studio, .08).texture;
-    this.scene.environmentIntensity = .63;
-    studio.dispose();
-    generator.dispose();
+    if (!this.software) {
+      const studio = new RoomEnvironment();
+      const generator = new THREE.PMREMGenerator(this.renderer);
+      this.scene.environment = generator.fromScene(studio, .08).texture;
+      this.scene.environmentIntensity = .63;
+      studio.dispose();
+      generator.dispose();
+    }
 
     this.scene.add(new THREE.HemisphereLight('#e8e0d2', '#836250', 1.2));
     this.sun = new THREE.DirectionalLight('#ffe2bd', 3.4);
@@ -327,7 +333,7 @@ export class Arena {
       this.renderer.shadowMap.needsUpdate = true;
       this.lastShadow = stamp;
     }
-    this.renderer.render(this.scene, this.camera);
+    this.renderer.render(this.scene, this.camera, this.motion);
     this.dirty = false;
   }
 }

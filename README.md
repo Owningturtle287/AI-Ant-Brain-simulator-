@@ -2,7 +2,7 @@
 
 AI Ant Brain Simulator · Phase 1, body and locomotion
 
-A mobile-first 3D simulator of a red imported fire ant worker (*Solenopsis invicta*). The 3.5 mm model has an articulated head, mandibles, six legs, ten segments per antenna, two waist segments, and a gaster. The walking controller plants feet in world coordinates and adjusts step lift and body tilt to the terrain. The current gait is a procedural tripod model informed by comparative ant research. Joint limits, compliance, and kinematics are approximations.
+A mobile-first 3D simulator of a red imported fire ant worker (*Solenopsis invicta*). The 3.5 mm model has an articulated head, mandibles, six legs, ten segments per antenna, two waist segments, and a gaster. The walking controller plants feet in world coordinates and adjusts step lift and body tilt to the terrain. The current gait is a procedural tripod model informed by comparative ant research. The primary renderer uses WebGL 2. A compatibility view projects the same rig and motion onto a 2D canvas when WebGL is unavailable. Joint limits, compliance, and kinematics are approximations.
 
 ## Run locally
 
@@ -15,7 +15,7 @@ npm test
 npm run build
 ```
 
-For a local offline-install test, run `npm run preview` after building.
+For a local offline-install test, run `npm run preview` after building. To run the browser smoke checks, install the test browser with `npx playwright install chromium` and run `npm run test:browser`.
 
 ## Phone installation
 
