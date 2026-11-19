@@ -6,6 +6,7 @@ import { randomGenerator, WorkerRig } from './worker.js';
 import { SoftwareView } from './software-view.js';
 
 const origin = new THREE.Vector3();
+const worldUp = new THREE.Vector3(0, 1, 0);
 const terrainColors = { loam: '#94775a', gravel: '#8d8172', tunnel: '#826a4f' };
 const scatterPalette = ['#877260', '#715744', '#584738', '#766450', '#b18e68', '#54483e', '#c1a684'];
 
@@ -300,11 +301,18 @@ export class Arena {
 
   setView(view) {
     this.view = view;
+    this.sideHeading = this.motion.heading;
     this.orbit.target.set(this.motion.x, this.motion.bodyPose().height, this.motion.z);
-    if (view === 'top') this.camera.position.copy(this.orbit.target).add(new THREE.Vector3(.07, 6.7, .46));
-    else {
+    if (view === 'top') {
+      this.camera.position.copy(this.orbit.target).add(new THREE.Vector3(.07, 6.7, .46));
+    } else if (view === 'side') {
+      const radius = this.camera.aspect < 1 ? 5.9 : 5.5;
+      this.camera.position.copy(this.orbit.target).add(new THREE.Vector3(
+        Math.sin(this.motion.heading) * radius, .56, Math.cos(this.motion.heading) * radius,
+      ));
+    } else {
       const narrow = this.camera.aspect < 1.17;
-      this.camera.position.copy(this.orbit.target).add(narrow ? new THREE.Vector3(3.2, 3.5, 5.8) : new THREE.Vector3(2.9, 3.1, 5.7));
+      this.camera.position.copy(this.orbit.target).add(narrow ? new THREE.Vector3(3.0, 3.0, 5.8) : new THREE.Vector3(2.55, 2.68, 5.48));
     }
     this.orbit.update();
     this.dirty = true;
@@ -339,6 +347,12 @@ export class Arena {
       const z = this.motion.z - sine * offset;
       mesh.position.set(x, terrainHeight(this.motion.terrain, x, z) + .04, z);
       mesh.rotation.y = this.motion.heading;
+    }
+    if (this.view === 'side' && this.sideHeading !== this.motion.heading) {
+      const offset = this.motion.heading - this.sideHeading;
+      this.camera.position.sub(this.orbit.target).applyAxisAngle(worldUp, offset).add(this.orbit.target);
+      this.sideHeading = this.motion.heading;
+      this.dirty = true;
     }
     this.focusPoint.set(this.motion.x + .12, this.motion.bodyPose().height * .82, this.motion.z);
     this.shift.subVectors(this.focusPoint, this.orbit.target).multiplyScalar(1 - Math.exp(-8 * dt));

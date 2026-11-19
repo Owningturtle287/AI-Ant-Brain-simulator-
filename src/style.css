@@ -134,6 +134,12 @@ dialog dd { margin: 3px 0 0; color: var(--muted); }
   .guide-tools { bottom: 8px; }
   .panel-content { padding: 16px; }
 }
+@media (max-width: 462px) {
+  .stage-overlay { flex-wrap: wrap; }
+  .view-tools { margin-left: auto; }
+  .view-tools button { min-width: 44px; padding: 0 6px; }
+  .view-tools button:has(span) i { display: none; }
+}
 @media (max-width: 365px) {
   .head-actions { gap: 5px; }
   .head-actions button { width: 44px; padding: 0; }

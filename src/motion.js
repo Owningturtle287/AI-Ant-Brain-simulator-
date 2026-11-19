@@ -3,9 +3,9 @@ export const arenaLimit = 6.6;
 export const bodyLength = 3.5;
 
 export const legTypes = [
-  { name: 'Front', x: .53, spread: .85, reach: .92, upper: .53, lower: .52, foot: .25 },
-  { name: 'Middle', x: .02, spread: 1.06, reach: .04, upper: .58, lower: .54, foot: .27 },
-  { name: 'Rear', x: -.46, spread: .91, reach: -.98, upper: .70, lower: .72, foot: .34 },
+  { name: 'Front', x: .329, socket: .165, spread: .87, reach: 1.03, upper: .53, lower: .52, foot: .25 },
+  { name: 'Middle', x: -.022, socket: .161, spread: 1.11, reach: -.025, upper: .58, lower: .54, foot: .27 },
+  { name: 'Rear', x: -.411, socket: .151, spread: .94, reach: -1.20, upper: .70, lower: .72, foot: .34 },
 ];
 
 export const gravelHills = [
@@ -165,7 +165,7 @@ export class AntMotion {
     const activity = Math.min(1, this.speed / 2.45);
     const stepWave = this.stride * twoPi;
     return {
-      height: .455 + (front + rear + right + left) * .25 + Math.cos(stepWave * 2) * .012 * activity,
+      height: .502 + (front + rear + right + left) * .25 + Math.cos(stepWave * 2) * .012 * activity,
       pitch: Math.atan2(front - rear, 1.1) + Math.sin(stepWave) * .013 * activity,
       roll: Math.atan2(left - right, 1.06) + Math.cos(stepWave) * .027 * activity,
     };

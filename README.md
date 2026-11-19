@@ -2,7 +2,7 @@
 
 AI Ant Brain Simulator · Phase 1, body and locomotion
 
-A mobile-first 3D simulator of a red imported fire ant worker (*Solenopsis invicta*). The 3.5 mm model has an articulated head, mandibles, six legs, ten segments per antenna, two waist segments, and a gaster. The walking controller plants feet in world coordinates and adjusts step lift and body tilt to the terrain. The current gait is a procedural tripod model informed by comparative ant research. The primary renderer uses WebGL 2. A compatibility view projects the same rig and motion onto a 2D canvas when WebGL is unavailable. Joint limits, compliance, and kinematics are approximations.
+A mobile-first 3D simulator of a red imported fire ant worker (*Solenopsis invicta*). The 3.5 mm model has an articulated head, mandibles, six legs, ten segments per antenna, two waist segments, and a tapering, segmented gaster. The head, mesosoma, waist, mouthparts, and limbs use custom-contoured surfaces based on worker photographs and measured anatomy. The walking controller plants feet in world coordinates and adjusts step lift and body tilt to the terrain. The current gait is a procedural tripod model informed by comparative ant research. The primary renderer uses WebGL 2. A compatibility view projects the same rig and motion onto a 2D canvas when WebGL is unavailable. Joint limits, compliance, and kinematics are approximations.
 
 ## Run locally
 
@@ -25,6 +25,7 @@ Open the deployment link. On iOS, use **Safari → Share → Add to Home Screen*
 
 ## Research
 
+- [AntWeb fire ant worker specimen views](https://www.antweb.org/images.do?caste=worker&genus=solenopsis&project=allantwebants&rank=species&species=invicta&subfamily=myrmicinae)
 - [Worker proportions and body-size scaling](https://doi.org/10.1093/jis/3.1.2)
 - [Worker morphology, UF/IFAS](https://ask.ifas.ufl.edu/publication/in352)
 - [Fire ant motion and stability in tunnels](https://doi.org/10.1073/pnas.1302428110)

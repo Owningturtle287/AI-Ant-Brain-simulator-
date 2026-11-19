@@ -37,8 +37,9 @@
           <div class="stage-overlay">
             <div class="stage-state"><div class="status-chip" id="sim-status"><span></span><strong>Running</strong></div><span id="render-mode" hidden>Compatibility view</span></div>
             <div class="view-tools" aria-label="Camera controls">
-              <button type="button" id="orbit" aria-pressed="true"><i data-icon="cube"></i><span>Orbit</span></button>
-              <button type="button" id="overhead" aria-pressed="false"><i data-icon="top"></i><span>Top</span></button>
+              <button type="button" id="orbit" aria-label="Orbit" aria-pressed="true"><i data-icon="cube"></i><span>Orbit</span></button>
+              <button type="button" id="overhead" aria-label="Top" aria-pressed="false"><i data-icon="top"></i><span>Top</span></button>
+              <button type="button" id="side" aria-label="Side" aria-pressed="false"><i data-icon="side"></i><span>Side</span></button>
               <button type="button" id="zoom-in" aria-label="Zoom in"><i data-icon="plus"></i></button>
               <button type="button" id="zoom-out" aria-label="Zoom out"><i data-icon="minus"></i></button>
             </div>
@@ -112,7 +113,7 @@
   <dialog id="help">
     <div class="dialog-heading"><h2>Controls</h2><button type="button" id="close-help" class="icon-button" aria-label="Close controls"><i data-icon="close"></i></button></div>
     <dl>
-      <dt>Look around</dt><dd>Drag the arena to orbit. Pinch, scroll, or use + and − to zoom.</dd>
+      <dt>Look around</dt><dd>Drag the arena to orbit. Use Top or Side to inspect the body from that angle. Pinch, scroll, or use + and − to zoom.</dd>
       <dt>Guide the ant</dt><dd>Turn on Guide ant and tap a patch of ground. You can also steer with the arrow keys while the arena has focus.</dd>
       <dt>Inspect a step</dt><dd>Pause or slow the simulation, then turn on joint markers or foot contacts in the Specimen tab.</dd>
     </dl>

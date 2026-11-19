@@ -10,6 +10,20 @@ const vertical = new Vector3();
 const transform = new Matrix4();
 const scratch = new Matrix4();
 
+function convexHull(points) {
+  const sorted = points.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const turn = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  const chain = sequence => {
+    const hull = [];
+    for (const point of sequence) {
+      while (hull.length > 1 && turn(hull.at(-2), hull.at(-1), point) <= 0) hull.pop();
+      hull.push(point);
+    }
+    return hull.slice(0, -1);
+  };
+  return [...chain(sorted), ...chain(sorted.reverse())];
+}
+
 function tint(hex, amount) {
   const red = hex >> 16;
   const green = (hex >> 8) & 255;
@@ -74,6 +88,44 @@ export class SoftwareView {
     }
   }
 
+  silhouette(mesh) {
+    const geometry = mesh.geometry;
+    const position = geometry.getAttribute('position');
+    const pointAt = index => this.screen(nearEnd.fromBufferAttribute(position, index).applyMatrix4(mesh.matrixWorld).applyMatrix4(transform));
+    if (geometry.userData.oval) {
+      return Array.from({ length: 32 }, (_, index) => pointAt(position.count - 33 + index));
+    }
+
+    const { rows, radial } = geometry.userData.profile;
+    const stride = radial + 1;
+    const first = pointAt(0), last = pointAt((rows - 1) * stride);
+    const axisX = last[0] - first[0], axisY = last[1] - first[1];
+    const rings = [];
+    const resolution = rows > 35 ? 23 : 9;
+    for (let section = 0; section < resolution; section++) {
+      const row = Math.round(section / (resolution - 1) * (rows - 1));
+      const ring = [];
+      for (let side = 0; side < 12; side++) {
+        ring.push(pointAt(row * stride + Math.floor(side / 12 * radial)));
+      }
+      rings.push(ring);
+    }
+    const middle = rings[Math.floor(rings.length / 2)];
+    if (Math.hypot(axisX, axisY) < Math.hypot(middle[0][0] - middle[6][0], middle[0][1] - middle[6][1]) * 1.05) {
+      return convexHull(rings.flat());
+    }
+    const edges = rings.map(ring => {
+      let low = ring[0], high = ring[0], minimum = Infinity, maximum = -Infinity;
+      for (const point of ring) {
+        const distance = -axisY * point[0] + axisX * point[1];
+        if (distance < minimum) { low = point; minimum = distance; }
+        if (distance > maximum) { high = point; maximum = distance; }
+      }
+      return [low, high];
+    });
+    return [...edges.map(edge => edge[0]), ...edges.map(edge => edge[1]).reverse()];
+  }
+
   sceneShapes(scene, camera) {
     const shapes = [];
     scene.traverseVisible(mesh => {
@@ -83,8 +135,12 @@ export class SoftwareView {
         return;
       }
       const geometry = mesh.geometry;
-      if (geometry.type === 'PlaneGeometry' || geometry.type === 'BufferGeometry') return;
-      world.setFromMatrixPosition(mesh.matrixWorld);
+      const sculpted = geometry.userData.profile || geometry.userData.oval;
+      if (geometry.type === 'PlaneGeometry' || (!sculpted && geometry.type === 'BufferGeometry')) return;
+      if (sculpted) {
+        if (!geometry.boundingSphere) geometry.computeBoundingSphere();
+        world.copy(geometry.boundingSphere.center).applyMatrix4(mesh.matrixWorld);
+      } else world.setFromMatrixPosition(mesh.matrixWorld);
       center.copy(world).applyMatrix4(transform);
       if (Math.abs(center.x) > 1.3 || Math.abs(center.y) > 1.3 || Math.abs(center.z) > 1) return;
       const screen = this.screen(center);
@@ -92,7 +148,10 @@ export class SoftwareView {
       const depth = center.z;
       const distance = camera.position.distanceTo(world);
       const scale = this.height / (2 * Math.tan(camera.fov * Math.PI / 360) * distance);
-      if (geometry.type === 'CylinderGeometry') {
+      if (sculpted) {
+        const silhouette = this.silhouette(mesh);
+        if (silhouette.length > 2) shapes.push({ silhouette, screen, color, depth, eye: Boolean(geometry.userData.oval) });
+      } else if (geometry.type === 'CylinderGeometry') {
         const first = this.screen(this.position(nearEnd, 0, -.5, 0, mesh.matrixWorld).applyMatrix4(transform));
         const last = this.screen(this.position(farEnd, 0, .5, 0, mesh.matrixWorld).applyMatrix4(transform));
         horizontal.setFromMatrixColumn(mesh.matrixWorld, 0);
@@ -164,6 +223,26 @@ export class SoftwareView {
 
   drawShape(shape) {
     const ctx = this.context;
+    if (shape.silhouette) {
+      const [first, ...edge] = shape.silhouette;
+      ctx.beginPath();
+      ctx.moveTo(...first);
+      let top = first[1], bottom = top;
+      for (const point of edge) {
+        ctx.lineTo(...point);
+        top = Math.min(top, point[1]);
+        bottom = Math.max(bottom, point[1]);
+      }
+      ctx.closePath();
+      const shade = ctx.createLinearGradient(0, top, 0, Math.max(top + 1, bottom));
+      shade.addColorStop(0, tint(shape.color, shape.eye ? .09 : .24));
+      shade.addColorStop(.32, tint(shape.color, shape.eye ? .035 : .10));
+      shade.addColorStop(.72, tint(shape.color, -.17));
+      shade.addColorStop(1, tint(shape.color, -.48));
+      ctx.fillStyle = shade;
+      ctx.fill();
+      return;
+    }
     if (shape.first || shape.path) {
       const path = shape.path ?? [shape.first, shape.last];
       const [x, y] = path[0];

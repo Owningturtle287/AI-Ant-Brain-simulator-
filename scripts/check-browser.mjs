@@ -25,6 +25,10 @@ try {
   await mkdir('browser-results', { recursive: true });
   await desktop.screenshot({ path: 'browser-results/desktop.png', timeout: 25_000 });
   console.log('Desktop WebGL rendered');
+  const side = desktop.getByRole('button', { name: 'Side', exact: true });
+  await side.click();
+  assert.equal(await side.getAttribute('aria-pressed'), 'true');
+  await desktop.screenshot({ path: 'browser-results/profile.png' });
   await desktop.getByRole('button', { name: 'Top', exact: true }).click();
   await desktop.getByRole('switch', { name: /Joint markers/ }).check();
   await desktop.getByRole('switch', { name: /Foot contacts/ }).check();

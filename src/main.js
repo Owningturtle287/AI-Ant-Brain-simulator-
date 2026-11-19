@@ -6,6 +6,7 @@ const icons = {
   help: '<circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8.9c0 1.8-2.9 2.25-2.9 4M12 17h.01"/>',
   close: '<path d="m6 6 12 12M18 6 6 18"/>',
   cube: '<path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Zm0 9 8-4.5M12 12 4 7.5M12 12v9"/>',
+  side: '<path d="M3 16h18M5 11l3-3h7l4 3v2H5zM8 13v3m8-3v3"/>',
   top: '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 12h6m-3-3v6"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   minus: '<path d="M5 12h14"/>',
@@ -94,11 +95,11 @@ function controls(arena) {
   play.addEventListener('click', () => setPaused(arena, !arena.flags.paused));
   $('reset').addEventListener('click', () => arena.reset());
   $('speed').addEventListener('change', event => { arena.flags.rate = Number(event.target.value); });
-  for (const [id, camera] of [['orbit', 'orbit'], ['overhead', 'top']]) {
+  const views = new Map([['orbit', 'orbit'], ['overhead', 'top'], ['side', 'side']]);
+  for (const [id, camera] of views) {
     $(id).addEventListener('click', () => {
       arena.setView(camera);
-      $('orbit').setAttribute('aria-pressed', camera === 'orbit');
-      $('overhead').setAttribute('aria-pressed', camera === 'top');
+      for (const view of views.keys()) $(view).setAttribute('aria-pressed', view === id);
     });
   }
   $('zoom-in').addEventListener('click', () => arena.zoom(.78));
