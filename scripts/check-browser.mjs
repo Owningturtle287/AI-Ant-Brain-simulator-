@@ -6,18 +6,25 @@ import { preview } from 'vite';
 const server = await preview({ preview: { host: '127.0.0.1', port: 4173, strictPort: true } });
 const url = 'http://127.0.0.1:4173/';
 let browser;
+const deadline = setTimeout(() => {
+  console.error('Browser checks exceeded the two-minute deadline.');
+  process.exit(1);
+}, 120_000);
 try {
   browser = await chromium.launch({
     args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
   });
+  console.log('Starting desktop WebGL check');
   const desktop = await browser.newPage({ viewport: { width: 1360, height: 900 }, reducedMotion: 'reduce' });
+  desktop.setDefaultTimeout(14_000);
   const errors = [];
   desktop.on('pageerror', error => errors.push(error.message));
   await desktop.goto(url);
   await desktop.locator('canvas').waitFor();
   assert.equal(await desktop.locator('#render-mode').isVisible(), false, 'WebGL renderer should be active');
   await mkdir('browser-results', { recursive: true });
-  await desktop.screenshot({ path: 'browser-results/desktop.png' });
+  await desktop.screenshot({ path: 'browser-results/desktop.png', timeout: 14_000 });
+  console.log('Desktop WebGL rendered');
   await desktop.getByRole('button', { name: 'Top', exact: true }).click();
   await desktop.getByRole('switch', { name: /Joint markers/ }).check();
   await desktop.getByRole('switch', { name: /Foot contacts/ }).check();
@@ -33,7 +40,9 @@ try {
   await desktop.getByRole('button', { name: 'Reset simulation' }).click();
   await desktop.waitForFunction(() => document.getElementById('sim-time').textContent === '00:00');
 
+  console.log('Desktop controls passed, starting phone layout and offline checks');
   const phone = await browser.newContext({ ...devices['iPhone 13'], reducedMotion: 'reduce' });
+  phone.setDefaultTimeout(14_000);
   const mobile = await phone.newPage();
   mobile.on('pageerror', error => errors.push(error.message));
   await mobile.goto(url);
@@ -47,7 +56,9 @@ try {
   assert.equal(await mobile.getByRole('heading', { name: 'Fire ant simulator' }).isVisible(), true);
   await phone.close();
 
+  console.log('Phone layout and offline reload passed, testing compatibility rendering');
   const fallback = await browser.newContext({ viewport: { width: 800, height: 660 }, reducedMotion: 'reduce' });
+  fallback.setDefaultTimeout(14_000);
   await fallback.addInitScript(() => {
     const original = HTMLCanvasElement.prototype.getContext;
     HTMLCanvasElement.prototype.getContext = function (backend, options) {
@@ -66,5 +77,9 @@ try {
   console.log('WebGL, narrow viewport, offline reload and compatibility rendering passed.');
 } finally {
   await browser?.close();
-  await new Promise((resolve, reject) => server.httpServer.close(error => error ? reject(error) : resolve()));
+  await new Promise((resolve, reject) => {
+    server.httpServer.close(error => error ? reject(error) : resolve());
+    server.httpServer.closeAllConnections();
+  });
+  clearTimeout(deadline);
 }

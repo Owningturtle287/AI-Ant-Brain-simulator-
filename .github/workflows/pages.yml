@@ -11,7 +11,7 @@ permissions:
 
 concurrency:
   group: github-pages
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -25,16 +25,31 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
-      - run: npx playwright install chromium --with-deps
-      - run: npm run test:browser
-      - uses: actions/upload-artifact@v6
-        with:
-          name: browser-screenshots
-          path: browser-results
-          retention-days: 7
       - uses: actions/upload-pages-artifact@v4
         with:
           path: dist
+  browser:
+    name: Browser smoke tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install chromium --with-deps
+      - run: npm run test:browser
+        timeout-minutes: 3
+      - uses: actions/upload-artifact@v6
+        if: success() || failure()
+        with:
+          name: browser-screenshots
+          path: browser-results
+          if-no-files-found: ignore
+          retention-days: 7
   deploy:
     environment:
       name: github-pages
