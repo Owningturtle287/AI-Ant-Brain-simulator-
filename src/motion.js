@@ -145,11 +145,12 @@ export class AntMotion {
     };
   }
 
-  updateSteering(dt) {
+  updateSteering(dt, motor) {
     const route = routes[this.terrain];
     let [targetX, targetZ] = this.destination ?? route[this.routeIndex];
     let gap = Math.hypot(targetX - this.x, targetZ - this.z);
-    if (!this.destination && !this.manual && gap < .44) {
+    const autonomous = motor && !this.destination && !this.manual;
+    if (!autonomous && !this.destination && !this.manual && gap < .44) {
       this.routeIndex = (this.routeIndex + 1) % route.length;
       [targetX, targetZ] = route[this.routeIndex];
       gap = Math.hypot(targetX - this.x, targetZ - this.z);
@@ -159,7 +160,7 @@ export class AntMotion {
 
     const targetHeading = this.manual ? Math.atan2(-this.manual[1], this.manual[0]) : Math.atan2(this.z - targetZ, targetX - this.x);
     const stopping = this.destination && this.arrived && !this.manual;
-    const error = stopping ? 0 : angleDelta(this.heading, targetHeading);
+    const error = autonomous ? motor.turn * .82 : stopping ? 0 : angleDelta(this.heading, targetHeading);
     this.turnIntent = clamp(error / .82, -1, 1);
     const targetYaw = clamp(error * 4.6, -maximumYawRate, maximumYawRate);
     this.yawRate = approach(this.yawRate, targetYaw, 15, dt);
@@ -169,8 +170,8 @@ export class AntMotion {
     const arrival = this.destination && !this.manual ? clamp(gap / .76, .12, 1) : 1;
     const alignment = .09 + .91 * Math.max(0, Math.cos(error)) ** 2;
     const turning = Math.max(.45, 1 - Math.abs(this.yawRate) * .18);
-    const targetSpeed = stopping ? 0 : cruising * arrival * alignment * turning;
-    const nextSpeed = approach(this.speed, targetSpeed, stopping ? 13 : 7.5, dt);
+    const targetSpeed = autonomous ? motor.pace * cruising * turning : stopping ? 0 : cruising * arrival * alignment * turning;
+    const nextSpeed = approach(this.speed, targetSpeed, targetSpeed === 0 ? 18 : 7.5, dt);
     const previousX = this.x, previousZ = this.z;
     const next = this.advance(this, nextSpeed, this.yawRate, dt);
     this.x = next.x;
@@ -259,9 +260,9 @@ export class AntMotion {
     }
   }
 
-  step(dt) {
+  step(dt, motor) {
     this.clock += dt;
-    this.updateSteering(dt);
+    this.updateSteering(dt, motor);
     const activity = this.speed + Math.abs(this.yawRate) * .52;
     const cadence = clamp(1.45 + activity * .53, 1.45, 3.12);
     this.stride += cadence * Math.min(1, activity * 2.5) * dt;

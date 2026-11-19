@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#151916">
-  <meta name="description" content="An interactive 3D fire ant anatomy and locomotion simulator.">
+  <meta name="description" content="Observe a fire ant worker and explore its simulated brain as it forages.">
   <link rel="icon" href="./icons/ant-192.png">
   <link rel="apple-touch-icon" href="./icons/apple-touch.png">
   <link rel="manifest" href="./manifest.webmanifest">
@@ -25,17 +25,16 @@
   <main>
     <div class="page-intro">
       <div>
-        <p class="eyebrow"><span></span> LOCOMOTION LAB</p>
         <h1>Fire ant simulator</h1>
-        <p class="intro-copy">Observe and guide an articulated red imported fire ant.</p>
+        <p class="intro-copy">Watch a red imported fire ant forage and inspect the neural activity behind its movements.</p>
       </div>
     </div>
 
-    <div class="workbench">
+    <div class="workbench" data-inspector="brain">
       <section class="simulation" aria-label="Interactive simulation">
         <div class="stage" id="stage" aria-label="3D fire ant arena">
           <div class="stage-overlay">
-            <div class="stage-state"><div class="status-chip" id="sim-status"><span></span><strong>Running</strong></div><span id="render-mode" hidden>Compatibility view</span></div>
+            <div class="stage-state"><div class="status-chip" id="sim-status"><span></span><strong>Running</strong></div><span id="worker-state">Searching</span><span id="render-mode" hidden>Compatibility view</span></div>
             <div class="view-tools" aria-label="Camera controls">
               <button type="button" id="orbit" aria-label="Orbit" aria-pressed="true"><i data-icon="cube"></i><span>Orbit</span></button>
               <button type="button" id="overhead" aria-label="Top" aria-pressed="false"><i data-icon="top"></i><span>Top</span></button>
@@ -70,10 +69,53 @@
 
       <aside class="panel" aria-label="Simulation inspector">
         <div class="tabs" role="tablist" aria-label="Inspector views">
-          <button type="button" id="specimen-tab" role="tab" aria-selected="true" aria-controls="specimen-panel"><i data-icon="ant"></i> Specimen</button>
+          <button type="button" id="brain-tab" role="tab" aria-selected="true" aria-controls="brain-panel"><i data-icon="brain"></i> Brain</button>
+          <button type="button" id="specimen-tab" role="tab" aria-selected="false" aria-controls="specimen-panel" tabindex="-1"><i data-icon="ant"></i> Specimen</button>
           <button type="button" id="terrain-tab" role="tab" aria-selected="false" aria-controls="terrain-panel" tabindex="-1"><i data-icon="terrain"></i> Terrain</button>
         </div>
-        <section class="panel-content" id="specimen-panel" role="tabpanel" aria-labelledby="specimen-tab">
+        <section class="panel-content brain-panel" id="brain-panel" role="tabpanel" aria-labelledby="brain-tab">
+          <div class="brain-heading">
+            <h2>Worker brain</h2>
+            <span class="atlas-caption">Anatomical model</span>
+          </div>
+          <div class="neural-metrics">
+            <div><span>Model neurons</span><strong id="brain-count">250,000</strong></div>
+            <div><span>Firing this tick</span><strong id="brain-active">0</strong></div>
+            <div><span>Delivered</span><strong id="food-count">0</strong></div>
+          </div>
+          <div class="brain-stage">
+            <canvas id="brain-canvas" role="img" aria-label="Worker brain anatomical projection with a sample of live neurons and connections"></canvas>
+          </div>
+          <div class="atlas-tools">
+            <button type="button" id="brain-view" aria-pressed="false"><i data-icon="flip"></i><span>Rear view</span></button>
+            <button type="button" id="brain-links" aria-pressed="true"><i data-icon="joints"></i><span>Connections</span></button>
+          </div>
+          <label class="region-control" for="brain-region"><span>Region</span><select id="brain-region"><option value="-1">Whole brain</option></select></label>
+          <div id="brain-description" class="brain-description">Bright dots show neurons firing. Tap a dot to see its connections.</div>
+          <div class="neuron-tools">
+            <button type="button" id="inspect-neuron">Inspect neuron</button>
+            <button type="button" id="clear-neuron" hidden>Clear selection</button>
+          </div>
+          <div class="neuron-detail" id="neuron-detail" hidden>
+            <strong id="neuron-name"></strong><span id="neuron-status"></span>
+            <ul id="neuron-sources" aria-label="Incoming modeled connections"></ul>
+          </div>
+          <div class="foraging-controls">
+            <h3>Foraging cues</h3>
+            <div class="atlas-tools">
+              <button type="button" id="place-food" aria-pressed="false"><i data-icon="target"></i><span>Place food</span></button>
+              <button type="button" id="show-trail" aria-pressed="false"><i data-icon="steps"></i><span>Show trail</span></button>
+              <button type="button" id="clear-trail">Clear trail</button>
+            </div>
+          </div>
+          <details class="model-notes">
+            <summary>Neuron estimates and sources</summary>
+            <p>The simulation allocates 250,000 neurons across seven populations. Population sizes and individual connections are model estimates. Dots show a sample of the modeled cells.</p>
+            <table><caption class="visually-hidden">Estimated model neurons per region</caption><thead><tr><th scope="col">Population</th><th scope="col">Model neurons</th></tr></thead><tbody id="region-counts"></tbody></table>
+            <p><a href="https://doi.org/10.1371/journal.pone.0083966" target="_blank" rel="noopener noreferrer">Fire-ant worker anatomy</a> · <a href="https://doi.org/10.1038/s41559-022-01784-1" target="_blank" rel="noopener noreferrer">Comparative brain cell atlas</a></p>
+          </details>
+        </section>
+        <section class="panel-content" id="specimen-panel" role="tabpanel" aria-labelledby="specimen-tab" hidden>
           <span class="section-label">SPECIMEN</span>
           <h2>Red imported fire ant</h2>
           <p class="latin">Solenopsis invicta</p>
@@ -112,7 +154,7 @@
       </aside>
     </div>
 
-    <footer><span>Articulated worker model</span><span>Phase 1 <span aria-hidden="true">/</span> Body &amp; locomotion</span></footer>
+    <footer><span>Solenopsis invicta worker</span><span>Body, behavior &amp; brain</span></footer>
   </main>
 
   <dialog id="help">
@@ -120,6 +162,8 @@
     <dl>
       <dt>Look around</dt><dd>Drag the arena to orbit. Use Top or Side to inspect the body from that angle. Pinch, scroll, or use + and − to zoom.</dd>
       <dt>Guide the ant</dt><dd>Turn on Guide ant and tap a patch of ground. You can also steer with the arrow keys while the arena has focus.</dd>
+      <dt>Watch the brain</dt><dd>Choose a region in the Brain tab. Bright dots show modeled activity and the connection lines show recent signals. Pause or slow down to inspect a neuron.</dd>
+      <dt>Change a foraging cue</dt><dd>Use Place food in the Brain tab, then tap the ground. Show trail reveals the scent, and Clear trail lets the worker search without the seeded trail.</dd>
       <dt>Inspect a step</dt><dd>Pause or slow the simulation, then turn on joint markers or foot contacts in the Specimen tab.</dd>
     </dl>
     <p id="install-help">On iPhone, open this page in Safari and use Share → Add to Home Screen. On Android, open Chrome’s menu and choose Install or Add to Home screen.</p>

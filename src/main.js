@@ -1,5 +1,6 @@
 import './style.css';
 import { Arena } from './arena.js';
+import { installBrainPanel } from './brain-panel.js';
 
 const icons = {
   download: '<path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4"/>',
@@ -20,6 +21,8 @@ const icons = {
   joints: '<circle cx="6" cy="17" r="2"/><circle cx="12" cy="7" r="2"/><circle cx="19" cy="14" r="2"/><path d="m7 15 4-6m3-1 4 4"/>',
   steps: '<path d="M7 12c-2 0-3 2-3 4s1 3 2 3c2 0 3-2 3-4s-1-3-2-3Zm9-7c-2 0-3 2-3 4s1 3 2 3c2 0 3-2 3-4s-1-3-2-3Z"/>',
   sting: '<path d="M5 5c0 7 4 11 13 13l3 3c-1.2-3.8-3.2-6.3-7-8.2C10.4 11 7.3 8.7 5 5Z"/>',
+  brain: '<path d="M12 5a3 3 0 0 0-5 0 4 4 0 0 0-3 6 3.7 3.7 0 0 0 2 6 3.4 3.4 0 0 0 6 1 3.4 3.4 0 0 0 6-1 3.7 3.7 0 0 0 2-6 4 4 0 0 0-3-6 3 3 0 0 0-5 0v13M5 10l3 1m11-1-3 1M9 15l3-2 3 2"/>',
+  flip: '<path d="M7 7a7 7 0 1 1-1.3 8M3 4v5h5"/>',
   check: '<path d="m5 12 5 5 9-10"/>',
 };
 
@@ -27,7 +30,7 @@ const $ = id => document.getElementById(id);
 const icon = name => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name]}</svg>`;
 for (const element of document.querySelectorAll('[data-icon]')) element.innerHTML = icon(element.dataset.icon);
 
-const tabs = [$('specimen-tab'), $('terrain-tab')];
+const tabs = [$('brain-tab'), $('specimen-tab'), $('terrain-tab')];
 function selectTab(tab) {
   for (const item of tabs) {
     const selected = item === tab;
@@ -35,13 +38,16 @@ function selectTab(tab) {
     item.tabIndex = selected ? 0 : -1;
     $(item.getAttribute('aria-controls')).hidden = !selected;
   }
+  document.querySelector('.workbench').dataset.inspector = tab.id.replace('-tab', '');
 }
 for (const tab of tabs) {
   tab.addEventListener('click', () => selectTab(tab));
   tab.addEventListener('keydown', event => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
-    const next = event.key === 'Home' ? tabs[0] : event.key === 'End' ? tabs[1] : tabs.find(item => item !== tab);
+    const index = tabs.indexOf(tab);
+    const delta = event.key === 'ArrowRight' ? 1 : -1;
+    const next = event.key === 'Home' ? tabs[0] : event.key === 'End' ? tabs.at(-1) : tabs[(index + delta + tabs.length) % tabs.length];
     selectTab(next);
     next.focus();
   });
@@ -114,17 +120,22 @@ function controls(arena) {
     });
   }
   const guide = $('guide');
-  guide.addEventListener('click', () => {
-    arena.flags.guide = !arena.flags.guide;
-    const active = arena.flags.guide;
-    guide.setAttribute('aria-pressed', active);
-    $('arena-hint').querySelector('span').textContent = active ? 'Tap ground to guide the ant' : 'Drag to orbit · Pinch or scroll to zoom';
-    if (!active) {
+  const place = $('place-food');
+  function setPointerMode(mode) {
+    arena.flags.guide = mode === 'guide';
+    arena.flags.food = mode === 'food';
+    guide.setAttribute('aria-pressed', arena.flags.guide);
+    place.setAttribute('aria-pressed', arena.flags.food);
+    $('arena-hint').querySelector('span').textContent = mode === 'guide' ? 'Tap ground to guide the ant' :
+      mode === 'food' ? 'Tap ground to place food' : 'Drag to orbit · Pinch or scroll to zoom';
+    if (!arena.flags.guide) {
       arena.motion.destination = null;
       arena.compass.visible = false;
       arena.dirty = true;
     }
-  });
+  }
+  guide.addEventListener('click', () => setPointerMode(arena.flags.guide ? null : 'guide'));
+  installBrainPanel(arena, setPointerMode);
   const terrains = document.querySelectorAll('[data-terrain]');
   for (const button of terrains) {
     button.addEventListener('click', () => {
@@ -161,7 +172,7 @@ try {
   host.replaceChildren(warning);
   $('sim-status').dataset.paused = true;
   $('sim-status').querySelector('strong').textContent = '3D unavailable';
-  for (const button of document.querySelectorAll('.view-tools button, .transport button, .transport select, .guide-tools button, [data-terrain], #quality, .toggle-row input')) button.disabled = true;
+  for (const button of document.querySelectorAll('.view-tools button, .transport button, .transport select, .guide-tools button, [data-terrain], #quality, .toggle-row input, .brain-panel button, .brain-panel select')) button.disabled = true;
 }
 
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {

@@ -4,6 +4,8 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { arenaLimit, AntMotion, terrainHeight } from './motion.js';
 import { randomGenerator, WorkerRig } from './worker.js';
 import { SoftwareView } from './software-view.js';
+import { ForagingWorker } from './foraging.js';
+import { ForagingScene } from './foraging-scene.js';
 
 const origin = new THREE.Vector3();
 const worldUp = new THREE.Vector3(0, 1, 0);
@@ -102,7 +104,8 @@ export class Arena {
     this.host = host;
     this.onStats = onStats;
     this.motion = new AntMotion();
-    this.flags = { paused: false, joints: false, contacts: false, sting: false, rate: 1, quality: 'auto', guide: false };
+    this.worker = new ForagingWorker();
+    this.flags = { paused: false, joints: false, contacts: false, sting: false, trail: false, rate: 1, quality: 'auto', guide: false, food: false };
     this.stingExtension = 0;
     this.lastStamp = 0;
     this.accumulator = 0;
@@ -163,6 +166,7 @@ export class Arena {
     this.shadows = this.software ? [] : contactShadows(this.scene);
     this.rig = new WorkerRig(this.scene, this.motion.legs);
     this.rig.update(this.motion, false, false);
+    this.foragingScene = new ForagingScene(this.scene, this.rig.head);
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
     this.compass = new THREE.Mesh(
@@ -204,6 +208,7 @@ export class Arena {
 
   reset() {
     this.motion.reset();
+    this.worker.reset();
     this.clearKeys();
     this.lastUIUpdate = -Infinity;
     this.accumulator = 0;
@@ -230,13 +235,18 @@ export class Arena {
     });
     canvas.addEventListener('pointerup', event => {
       fingers.delete(event.pointerId);
-      if (this.flags.guide && press?.[2] === event.pointerId &&
+      if ((this.flags.guide || this.flags.food) && press?.[2] === event.pointerId &&
           Math.hypot(press[0] - event.clientX, press[1] - event.clientY) < 8) {
         const box = canvas.getBoundingClientRect();
         this.pointer.set((event.clientX - box.left) / box.width * 2 - 1, 1 - (event.clientY - box.top) / box.height * 2);
         this.raycaster.setFromCamera(this.pointer, this.camera);
         const point = this.raycaster.intersectObject(this.terrain.floor)[0]?.point;
-        if (point) {
+        if (point && this.flags.food) {
+          this.worker.placeFood(point.x, point.z);
+          this.dirty = true;
+          this.renderer.shadowMap.needsUpdate = true;
+          this.onFoodPlaced?.();
+        } else if (point) {
           this.motion.steerTo(point.x, point.z);
           const [x, z] = this.motion.destination;
           const y = terrainHeight(this.motion.terrain, x, z);
@@ -335,7 +345,8 @@ export class Arena {
       this.accumulator += dt * this.flags.rate;
       const step = 1 / 120;
       while (this.accumulator >= step) {
-        this.motion.step(step);
+        const motor = this.worker.step(step, this.motion);
+        this.motion.step(step, motor);
         this.accumulator -= step;
       }
       this.dirty = true;
@@ -374,9 +385,12 @@ export class Arena {
 
     if (stamp - this.lastUIUpdate > 110) {
       this.onStats(this.motion.clock, this.motion.legs.filter(leg => !leg.swinging).length);
+      this.onBrainStats?.();
       this.lastUIUpdate = stamp;
     }
+    this.onFrame?.();
     if (!this.dirty) return;
+    this.foragingScene.update(this.worker, this.motion.terrain, this.flags.trail);
     if ((!this.flags.paused || this.renderer.shadowMap.needsUpdate) && stamp - this.lastShadow > (this.lowPower ? 63 : 30)) {
       this.sun.target.position.set(this.motion.x, 0, this.motion.z);
       this.sun.position.copy(this.sun.target.position).add(new THREE.Vector3(3.3, 6.0, -4.0));

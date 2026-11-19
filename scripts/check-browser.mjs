@@ -20,12 +20,28 @@ try {
   const errors = [];
   desktop.on('pageerror', error => errors.push(error.message));
   await desktop.goto(url, { waitUntil: 'commit' });
-  await desktop.locator('canvas').waitFor();
+  const canvas = desktop.locator('#canvas-host canvas');
+  await canvas.waitFor();
   assert.equal(await desktop.locator('#render-mode').isVisible(), false, 'WebGL renderer should be active');
-  assert.equal(await desktop.locator('canvas').evaluate(canvas => Boolean(canvas.getContext('webgl2'))), true);
+  assert.equal(await canvas.evaluate(canvas => Boolean(canvas.getContext('webgl2'))), true);
   await mkdir('browser-results', { recursive: true });
   await desktop.screenshot({ path: 'browser-results/desktop.png', timeout: 25_000 });
   console.log('Desktop WebGL rendered');
+  assert.equal(await desktop.locator('#brain-count').textContent(), '250,000');
+  await desktop.getByLabel('Region', { exact: true }).selectOption({ label: 'Antennal lobes' });
+  await desktop.getByRole('button', { name: 'Inspect neuron' }).click();
+  assert.equal(await desktop.locator('#neuron-sources li').count(), 3);
+  await desktop.getByRole('button', { name: 'Rear view' }).click();
+  assert.equal(await desktop.getByRole('button', { name: 'Front view' }).getAttribute('aria-pressed'), 'true');
+  await desktop.getByRole('button', { name: 'Connections' }).click();
+  assert.equal(await desktop.getByRole('button', { name: 'Connections' }).getAttribute('aria-pressed'), 'false');
+  await desktop.getByRole('button', { name: 'Connections' }).click();
+  await desktop.getByRole('button', { name: 'Show trail' }).click();
+  await desktop.getByRole('button', { name: 'Place food' }).click();
+  const position = await canvas.boundingBox();
+  await canvas.click({ position: { x: position.width * .57, y: position.height * .57 } });
+  assert.equal(await desktop.getByRole('button', { name: 'Place food' }).getAttribute('aria-pressed'), 'false');
+  await desktop.getByRole('tab', { name: 'Specimen' }).click();
   const side = desktop.getByRole('button', { name: 'Side', exact: true });
   await side.click();
   assert.equal(await side.getAttribute('aria-pressed'), 'true');
@@ -37,7 +53,6 @@ try {
   await desktop.getByRole('tab', { name: 'Terrain' }).click();
   await desktop.getByRole('button', { name: /Open tunnel/ }).click();
   await desktop.getByRole('button', { name: 'Guide ant' }).click();
-  const canvas = desktop.locator('canvas');
   const box = await canvas.boundingBox();
   await canvas.click({ position: { x: box.width * .62, y: box.height * .5 } });
   await desktop.getByRole('button', { name: 'Play simulation' }).click();
@@ -59,7 +74,7 @@ try {
   const mobile = await phone.newPage();
   mobile.on('pageerror', error => errors.push(error.message));
   await mobile.goto(url, { waitUntil: 'commit' });
-  await mobile.locator('canvas').waitFor();
+  await mobile.locator('#canvas-host canvas').waitFor();
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth), 390);
   assert.equal(await mobile.locator('#render-mode').isVisible(), true, 'The compatibility renderer should be labeled');
   await mobile.screenshot({ path: 'browser-results/phone.png', fullPage: true });
@@ -69,7 +84,7 @@ try {
   mobile.on('requestfailed', request => failedOfflineRequests.push([request.url(), request.failure()?.errorText]));
   try {
     await mobile.reload({ waitUntil: 'commit' });
-    await mobile.locator('canvas').waitFor();
+    await mobile.locator('#canvas-host canvas').waitFor();
   } catch (error) {
     console.error('Offline state:', await mobile.locator('body').innerText(), failedOfflineRequests, errors);
     throw error;
@@ -78,6 +93,11 @@ try {
   await mobile.getByRole('button', { name: 'Zoom in' }).click();
   await mobile.getByRole('button', { name: 'Play simulation' }).click();
   await mobile.waitForFunction(() => document.getElementById('sim-time').textContent !== '00:00');
+  await mobile.waitForFunction(() => document.getElementById('brain-active').textContent !== '0');
+  await mobile.getByRole('button', { name: 'Pause simulation' }).click();
+  await mobile.getByRole('button', { name: 'Inspect neuron' }).click();
+  assert.equal(await mobile.locator('#neuron-detail').isVisible(), true);
+  await mobile.screenshot({ path: 'browser-results/neural-activity.png', fullPage: true });
   await phone.close();
   assert.deepEqual(errors, [], 'Browser pages must have no uncaught errors');
   console.log('WebGL, narrow viewport, offline reload and compatibility rendering passed.');
