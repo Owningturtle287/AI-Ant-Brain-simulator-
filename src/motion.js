@@ -25,6 +25,7 @@ const smooth = weight => weight * weight * (3 - 2 * weight);
 const angleDelta = (from, to) => Math.atan2(Math.sin(to - from), Math.cos(to - from));
 
 export function terrainHeight(terrain, x, z) {
+  if (typeof terrain === 'function') return terrain(x, z);
   const grain = .009 * Math.sin(10 * x + 3 * z) * Math.cos(12 * z - 2 * x);
   if (terrain === 'tunnel') {
     const channel = z - .30 * Math.sin(x * .55);
@@ -75,10 +76,10 @@ export class AntMotion {
     this.reset();
   }
 
-  reset() {
-    this.x = 0;
-    this.z = 0;
-    this.heading = .12;
+  reset(x = 0, z = 0, heading = .12) {
+    this.x = x;
+    this.z = z;
+    this.heading = heading;
     this.yawRate = 0;
     this.turnIntent = 0;
     this.stride = 0;
@@ -138,10 +139,11 @@ export class AntMotion {
     const midHeading = (heading + pose.heading) * .5;
     const halfTurn = (heading - pose.heading) * .5;
     const span = speed * duration * (Math.abs(halfTurn) < .001 ? 1 : Math.sin(halfTurn) / halfTurn);
+    const limit = typeof this.terrain === 'function' ? Infinity : arenaLimit;
     return {
       heading,
-      x: clamp(pose.x + Math.cos(midHeading) * span, -arenaLimit, arenaLimit),
-      z: clamp(pose.z - Math.sin(midHeading) * span, -arenaLimit, arenaLimit),
+      x: clamp(pose.x + Math.cos(midHeading) * span, -limit, limit),
+      z: clamp(pose.z - Math.sin(midHeading) * span, -limit, limit),
     };
   }
 
@@ -263,6 +265,22 @@ export class AntMotion {
   step(dt, motor) {
     this.clock += dt;
     this.updateSteering(dt, motor);
+    this.updateGait(dt);
+  }
+
+  follow(dt, agent) {
+    this.clock += dt;
+    this.distance += Math.hypot(agent.x - this.x, agent.z - this.z);
+    this.speed = agent.speed;
+    this.yawRate = agent.turn;
+    this.turnIntent = agent.turn / maximumYawRate;
+    this.x = agent.x;
+    this.z = agent.z;
+    this.heading = agent.heading;
+    this.updateGait(dt, agent);
+  }
+
+  updateGait(dt, agent) {
     const activity = this.speed + Math.abs(this.yawRate) * .52;
     const cadence = clamp(1.45 + activity * .53, 1.45, 3.12);
     this.stride += cadence * Math.min(1, activity * 2.5) * dt;
@@ -295,10 +313,10 @@ export class AntMotion {
         available--;
       }
     }
-    this.updateBody(dt);
+    this.updateBody(dt, agent);
   }
 
-  updateBody(dt) {
+  updateBody(dt, agent) {
     const forwardX = Math.cos(this.heading), forwardZ = -Math.sin(this.heading);
     const heightAt = (along, across) => terrainHeight(this.terrain,
       this.x + along * forwardX - across * forwardZ, this.z + along * forwardZ + across * forwardX);
@@ -315,9 +333,14 @@ export class AntMotion {
     this.pose.pitch = approach(this.pose.pitch, Math.atan2(front - rear, 1.02) + Math.sin(step + .5) * .033 * activity, 13, dt);
     this.pose.roll = approach(this.pose.roll, Math.atan2(left - right, .94) + Math.cos(step) * .043 * activity - turn * .10, 14, dt);
     const scan = Math.sin(this.clock * 2.4) * .069 + Math.sin(this.clock * .84) * .038;
+    const grooming = agent?.state === 'Grooming';
+    const resting = agent?.state === 'Resting and scanning';
+    const scanYaw = grooming ? .24 * Math.sin(this.clock * 5) :
+      resting ? agent.looking * Math.sin(this.clock * 2.1) : 0;
     const target = {
-      headYaw: turn * .44 + this.turnIntent * .19 + scan * (1 - activity * .74) + Math.sin(step + .44) * .032 * activity,
-      headPitch: -.24 - this.pose.pitch * .39 + Math.sin(step * 2 + .65) * .037 * activity,
+      headYaw: turn * .44 + this.turnIntent * .19 + scan * (1 - activity * .74) + Math.sin(step + .44) * .032 * activity + scanYaw,
+      headPitch: -.24 - this.pose.pitch * .39 + Math.sin(step * 2 + .65) * .037 * activity
+        - (grooming ? .12 * (.5 + .5 * Math.sin(this.clock * 7)) : 0),
       headRoll: -this.pose.roll * .50 + Math.sin(step - .2) * .031 * activity - turn * .038,
       waistYaw: -turn * .238 + Math.sin(step - .8) * .047 * activity,
       waistPitch: .024 - this.pose.pitch * .26 + Math.sin(step - .45) * .036 * activity,

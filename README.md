@@ -1,29 +1,33 @@
 # Fire Ant Lab
 
-AI Ant Brain Simulator · Phase 2, brain and embodied foraging
+AI Ant Brain Simulator · Colony training
 
-A mobile-first 3D simulator of a red imported fire ant worker (*Solenopsis invicta*). The 3.5 mm model has an articulated head, mandibles, six legs, ten segments per antenna, two waist segments, and a tapering, segmented gaster. The head, mesosoma, waist, mouthparts, and limbs use custom-contoured surfaces based on worker photographs and measured anatomy. The walking controller keeps stance feet and their angles fixed in world coordinates. It predicts the trajectory during each swing, shortening the steps on the inside of a curve, and adjusts toe lift to terrain. The head leads a turn while the waist and abdomen follow with a delay. The gait is a procedural tripod model informed by comparative ant research. The primary renderer uses WebGL 2. A compatibility view projects the same rig and motion onto a 2D canvas when WebGL is unavailable. Joint limits, compliance, and kinematics are approximations.
+Fire Ant Lab is a mobile-first 3D colony simulation inspired by the red imported fire ant (*Solenopsis invicta*). Each run starts with one stationary queen and one adult worker. The open world streams seeded terrain with scattered food and water. Workers discover nearby patches, share those locations and their needs, and choose among scouting, eating, drinking, nursing brood, supplying the colony, grooming, and resting.
 
-The head turns side to side, tilts up and down, and rolls at the neck. The petiole, postpetiole, and gaster share the bend through the waist. In a tight turn the head can rotate about 38° from the trunk, with a comparable total side bend at the abdomen. These angles are animation estimates informed by comparative ant anatomy. In **Specimen**, use **Extend sting** to reveal the curved tip and **Side** to inspect the segmented abdomen.
+| Setting | Default |
+| --- | ---: |
+| Egg interval | 10 simulated seconds |
+| Egg, larva, and pupa duration | 60 simulated seconds each |
+| Adult age limit | Unlimited |
+| Worker cap | 40 |
+| Failure restart | On |
+| Online learning | On |
+| Mutation amplitude per weight | 0.10 |
 
-## Worker brain and behavior
+Eggs accumulate around the queen. Workers can pick up brood and carry it to the nursery. The care meter applies to all three stages. Larvae also require food. The queen depends on workers for food and water. Adults can die when either reserve runs out. If the queen dies or the last worker is lost, the run fails. With auto-restart enabled, a new world starts four simulated seconds later.
 
-The worker explores or follows a bilateral odor gradient sampled around its antennae. Food contact interrupts walking so the worker can sample and pick up a crumb. It then uses estimated displacement to return to the nest and reinforces the simulated trail on the way. The Brain tab shows the current firing count, an anatomical projection in front and rear views, and sampled neurons with inspectable inputs. Choose **Place food**, then tap the arena to move the food. **Show trail** reveals the scent deposits. **Clear trail** lets the worker search on its own. Reset restores the starter trail and food.
+## Training
 
-The published fire-ant worker anatomy labels select receptor-expressing neurons. The 250,000-neuron total is this project's modeling target. The distribution is provisional. The mushroom body allocation uses a comparative anchor from a single-cell atlas reporting about 24% Kenyon cells in the whole-brain profiles of Pharaoh ants. The other allocations are modeling assumptions based on the observed regions and their proposed functions. The location of each displayed neuron is an illustrative placement within its model region.
+Each worker owns a small, trainable action-value policy. Its 66 weights score eleven available tasks using cues for deficit, distance, cargo, and nearby demand. The founder starts with hand-set weights that make basic survival possible. Small exploratory variations sometimes favor a different task. Temporal-difference updates use the rewards from successful deliveries, self-care, scouting, and brood care, with a cost for time spent. This setup learns task priorities while the action repertoire, terrain navigation, and leg mechanics are authored. The default checkpoint score includes survival time, hatchings, deliveries, losses, and the queen's reserves.
 
-| Population | Modeled neurons | Allocation basis |
-| --- | ---: | --- |
-| Mushroom bodies | 60,000 | 24% comparative Kenyon-cell prior |
-| Antennal lobes | 18,000 | Provisional bilateral olfactory processing |
-| Optic lobes | 12,000 | Provisional small visual populations |
-| Lateral horns | 14,000 | Provisional olfactory relay populations |
-| Central complex | 9,000 | Provisional midline orientation and steering |
-| Subesophageal zone and modeled descending relays | 24,000 | Provisional contact, taste, and motor output |
-| Other central brain | 113,000 | Remaining central and relay populations |
-| **Total** | **250,000** | **Modeling target** |
+Each egg gets a snapshot of the most recently matured worker's current weights and a small independent mutation. The first eggs inherit from the founder. Hatching creates an independent worker that continues to learn from its own outcomes. The highest-scoring checkpoint so far is saved in this browser and seeds the next founder. The learned policy and survival outcome depend on the world seed and settings.
 
-All 250,000 units have individual membrane state, thresholds, firing history, and three seeded synapses each. The solver advances in 50 ms steps with separate left and right channels. It reads the previous step’s firing traces through 750,000 synthetic weighted synapses. Comparative insect anatomy informs the region-level projections. The model uses explicit sensory and foraging rules to drive these circuits, and the resulting motor population activity sets pace and yaw during autonomous movement. The previously developed leg controller converts this output into a coordinated gait. Guide and keyboard modes override locomotion for inspection. The viewer draws a sample of actual model events, with connection lines lit when their source fired in the previous model step.
+## Controls
+
+- **Nest** centers the queen and nursery. **Worker** follows the current worker. **Explore** lets you pan across the world with two fingers or a right-button drag.
+- **Settings** opens the lifecycle, world, training, and worker panels. Change the simulation clock speed from the bottom toolbar. Speed applies to the full model clock, including decay and development.
+- **Training** shows the seed, policy updates, hatchings, care visits, and deliveries. **Start new run** generates a fresh world from the saved checkpoint.
+- **Worker & brain** shows the selected worker's generation, reserves, and reward. The optional 250,000-neuron anatomical viewer runs a separate spiking readout driven by that worker's sensor and movement signals. The regional cell counts and 750,000 individual connections in the anatomy model are estimates.
 
 ## Run locally
 

@@ -1,178 +1,216 @@
 import './style.css';
-import { Arena } from './arena.js';
+import { ColonyArena } from './arena.js';
 import { installBrainPanel } from './brain-panel.js';
 
+const $ = id => document.getElementById(id);
 const icons = {
-  download: '<path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4"/>',
-  help: '<circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8.9c0 1.8-2.9 2.25-2.9 4M12 17h.01"/>',
+  settings: '<path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="2.5" fill="#1b2119"/><circle cx="15" cy="17" r="2.5" fill="#1b2119"/>',
   close: '<path d="m6 6 12 12M18 6 6 18"/>',
-  cube: '<path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Zm0 9 8-4.5M12 12 4 7.5M12 12v9"/>',
-  side: '<path d="M3 16h18M5 11l3-3h7l4 3v2H5zM8 13v3m8-3v3"/>',
-  top: '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 12h6m-3-3v6"/>',
-  plus: '<path d="M12 5v14M5 12h14"/>',
-  minus: '<path d="M5 12h14"/>',
-  pointer: '<path d="m5 4 14 8-7 1-2 7L5 4Z"/>',
-  target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3"/>',
   pause: '<path fill="currentColor" stroke="none" d="M8 5h3v14H8zm5 0h3v14h-3z"/>',
   play: '<path fill="currentColor" stroke="none" d="M8 5l11 7-11 7z"/>',
-  reset: '<path d="M4 11a8 8 0 1 1 2 6m-2-6V5m0 6h6"/>',
-  ant: '<path d="M10 6 8 3m6 3 2-3M5 8l3 2m8 0 3-2M4 13h4m8 0h4M6 18l2-2m8 0 2 2"/><ellipse cx="12" cy="7.5" rx="3" ry="2.5"/><ellipse cx="12" cy="12" rx="3.5" ry="2.5"/><ellipse cx="12" cy="17.5" rx="3.2" ry="3"/>',
-  terrain: '<path d="m3 17 6-9 4 6 3-4 5 7H3Zm5-8 1-2m7-2h.01"/>',
-  joints: '<circle cx="6" cy="17" r="2"/><circle cx="12" cy="7" r="2"/><circle cx="19" cy="14" r="2"/><path d="m7 15 4-6m3-1 4 4"/>',
-  steps: '<path d="M7 12c-2 0-3 2-3 4s1 3 2 3c2 0 3-2 3-4s-1-3-2-3Zm9-7c-2 0-3 2-3 4s1 3 2 3c2 0 3-2 3-4s-1-3-2-3Z"/>',
-  sting: '<path d="M5 5c0 7 4 11 13 13l3 3c-1.2-3.8-3.2-6.3-7-8.2C10.4 11 7.3 8.7 5 5Z"/>',
-  brain: '<path d="M12 5a3 3 0 0 0-5 0 4 4 0 0 0-3 6 3.7 3.7 0 0 0 2 6 3.4 3.4 0 0 0 6 1 3.4 3.4 0 0 0 6-1 3.7 3.7 0 0 0 2-6 4 4 0 0 0-3-6 3 3 0 0 0-5 0v13M5 10l3 1m11-1-3 1M9 15l3-2 3 2"/>',
-  flip: '<path d="M7 7a7 7 0 1 1-1.3 8M3 4v5h5"/>',
-  check: '<path d="m5 12 5 5 9-10"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  minus: '<path d="M5 12h14"/>',
 };
-
-const $ = id => document.getElementById(id);
-const icon = name => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name]}</svg>`;
+function icon(name) {
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name]}</svg>`;
+}
 for (const element of document.querySelectorAll('[data-icon]')) element.innerHTML = icon(element.dataset.icon);
 
-const tabs = [$('brain-tab'), $('specimen-tab'), $('terrain-tab')];
-function selectTab(tab) {
-  for (const item of tabs) {
-    const selected = item === tab;
-    item.setAttribute('aria-selected', selected);
-    item.tabIndex = selected ? 0 : -1;
-    $(item.getAttribute('aria-controls')).hidden = !selected;
+function storage(key, value) {
+  try {
+    if (value !== undefined) localStorage.setItem(key, JSON.stringify(value));
+    else return JSON.parse(localStorage.getItem(key));
+  } catch {
+    // Private storage may be unavailable. The colony still runs in memory.
   }
-  document.querySelector('.workbench').dataset.inspector = tab.id.replace('-tab', '');
+  return null;
 }
-for (const tab of tabs) {
-  tab.addEventListener('click', () => selectTab(tab));
-  tab.addEventListener('keydown', event => {
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-    event.preventDefault();
-    const index = tabs.indexOf(tab);
-    const delta = event.key === 'ArrowRight' ? 1 : -1;
-    const next = event.key === 'Home' ? tabs[0] : event.key === 'End' ? tabs.at(-1) : tabs[(index + delta + tabs.length) % tabs.length];
-    selectTab(next);
-    next.focus();
-  });
-}
+const settingsKey = 'fire-ant-colony-settings-v1';
+const championKey = 'fire-ant-colony-champion-v1';
+const settingsInputs = [...document.querySelectorAll('[data-setting]')];
+const stored = storage(settingsKey) ?? {};
 
-const help = $('help');
-$('open-help').addEventListener('click', () => help.showModal());
-$('close-help').addEventListener('click', () => help.close());
+function readSetting(input, candidate) {
+  if (input.type === 'checkbox') return typeof candidate === 'boolean' ? candidate : input.defaultChecked;
+  const value = candidate === '' || candidate === null ? NaN : Number(candidate);
+  return Number.isFinite(value) ? Math.max(Number(input.min), Math.min(Number(input.max), value)) : Number(input.defaultValue);
+}
+const settings = Object.fromEntries(settingsInputs.map(input => {
+  const key = input.dataset.setting;
+  const value = readSetting(input, stored[key]);
+  if (input.type === 'checkbox') input.checked = value;
+  else input.value = value;
+  return [key, value];
+}));
 
 let installEvent;
 const install = $('install');
-const appleMobile = /iP(?:ad|hone|od)/.test(navigator.userAgent) ||
+const apple = /iP(?:ad|hone|od)/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-if (appleMobile && !navigator.standalone && !matchMedia('(display-mode: standalone)').matches) install.hidden = false;
+if (apple && !navigator.standalone && !matchMedia('(display-mode: standalone)').matches) install.hidden = false;
 window.addEventListener('beforeinstallprompt', event => {
   event.preventDefault();
   installEvent = event;
   install.hidden = false;
 });
-window.addEventListener('appinstalled', () => {
-  installEvent = null;
-  install.hidden = true;
-});
+window.addEventListener('appinstalled', () => { install.hidden = true; });
 install.addEventListener('click', async () => {
-  if (!installEvent) return help.showModal();
+  if (!installEvent) {
+    window.alert('In Safari, use Share → Add to Home Screen.');
+    return;
+  }
   await installEvent.prompt();
   installEvent = null;
   install.hidden = true;
 });
 
-function updateStats(seconds, planted) {
-  const elapsed = Math.floor(seconds);
-  const minutes = String(Math.floor(elapsed / 60)).padStart(2, '0');
-  const remainder = String(elapsed % 60).padStart(2, '0');
-  $('sim-time').textContent = `${minutes}:${remainder}`;
-  $('foot-count').firstChild.nodeValue = `${planted} `;
-}
-
-function setPaused(arena, paused) {
-  arena.flags.paused = paused;
-  const play = $('play');
-  play.setAttribute('aria-label', paused ? 'Play simulation' : 'Pause simulation');
-  play.querySelector('span').textContent = paused ? 'Play' : 'Pause';
-  play.querySelector('i').innerHTML = icon(paused ? 'play' : 'pause');
-  const status = $('sim-status');
-  status.dataset.paused = paused;
-  status.querySelector('strong').textContent = paused ? 'Paused' : 'Running';
-}
+const text = (id, value) => {
+  const item = $(id);
+  const next = String(value);
+  if (item.textContent !== next) item.textContent = next;
+};
+const percent = value => `${Math.round(value * 100)}%`;
 
 function controls(arena) {
+  const { colony } = arena;
+  const play = $('play');
+  const drawer = $('settings-panel');
+  const settingsButton = $('settings-button');
+  const brainDetails = $('brain-details');
+  const picker = $('worker-picker');
+  const views = [...document.querySelectorAll('[data-view]')];
+  let brainReady = false;
+  let lastBest = null;
+  let previousOptions = '';
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+  arena.flags.paused = reduced.matches;
   $('render-mode').hidden = !arena.software;
   $('quality').disabled = arena.software;
-  const play = $('play');
-  play.addEventListener('click', () => setPaused(arena, !arena.flags.paused));
-  $('reset').addEventListener('click', () => arena.reset());
-  $('speed').addEventListener('change', event => { arena.flags.rate = Number(event.target.value); });
-  const views = new Map([['orbit', 'orbit'], ['overhead', 'top'], ['side', 'side']]);
-  for (const [id, camera] of views) {
-    $(id).addEventListener('click', () => {
-      arena.setView(camera);
-      for (const view of views.keys()) $(view).setAttribute('aria-pressed', view === id);
-    });
-  }
-  $('zoom-in').addEventListener('click', () => arena.zoom(.78));
-  $('zoom-out').addEventListener('click', () => arena.zoom(1.28));
-  for (const flag of ['joints', 'contacts', 'sting']) {
-    $(flag).addEventListener('change', event => {
-      arena.flags[flag] = event.target.checked;
-      arena.dirty = true;
-    });
-  }
-  const guide = $('guide');
-  const place = $('place-food');
-  function setPointerMode(mode) {
-    arena.flags.guide = mode === 'guide';
-    arena.flags.food = mode === 'food';
-    guide.setAttribute('aria-pressed', arena.flags.guide);
-    place.setAttribute('aria-pressed', arena.flags.food);
-    $('arena-hint').querySelector('span').textContent = mode === 'guide' ? 'Tap ground to guide the ant' :
-      mode === 'food' ? 'Tap ground to place food' : 'Drag to orbit · Pinch or scroll to zoom';
-    if (!arena.flags.guide) {
-      arena.motion.destination = null;
-      arena.compass.visible = false;
-      arena.dirty = true;
+
+  function refreshBrain() {
+    const show = !drawer.hidden && brainDetails.open;
+    arena.enableBrain(show);
+    if (show && !brainReady) {
+      installBrainPanel(arena);
+      brainReady = true;
     }
   }
-  guide.addEventListener('click', () => setPointerMode(arena.flags.guide ? null : 'guide'));
-  installBrainPanel(arena, setPointerMode);
-  const terrains = document.querySelectorAll('[data-terrain]');
-  for (const button of terrains) {
-    button.addEventListener('click', () => {
-      if (arena.motion.terrain === button.dataset.terrain) return;
-      arena.setTerrain(button.dataset.terrain);
-      for (const item of terrains) item.setAttribute('aria-pressed', item === button);
+
+  function openSettings(open) {
+    drawer.hidden = !open;
+    settingsButton.setAttribute('aria-expanded', open);
+    refreshBrain();
+    if (!open) settingsButton.focus();
+  }
+  settingsButton.addEventListener('click', () => openSettings(drawer.hidden));
+  $('settings-close').addEventListener('click', () => openSettings(false));
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !drawer.hidden) openSettings(false);
+  });
+  brainDetails.addEventListener('toggle', refreshBrain);
+  picker.addEventListener('change', () => {
+    arena.inspect(Number(picker.value));
+    updateStats();
+  });
+  for (const input of settingsInputs) {
+    input.addEventListener('change', () => {
+      const value = readSetting(input, input.type === 'checkbox' ? input.checked : input.value);
+      colony.settings[input.dataset.setting] = value;
+      if (input.type !== 'checkbox') input.value = value;
+      storage(settingsKey, colony.settings);
     });
   }
-  $('quality').addEventListener('change', event => arena.setQuality(event.target.value));
-  const reduced = matchMedia('(prefers-reduced-motion: reduce)');
-  setPaused(arena, reduced.matches);
-  reduced.addEventListener('change', event => {
-    if (event.matches) setPaused(arena, true);
+  for (const input of document.querySelectorAll('[data-visual]')) {
+    input.addEventListener('change', () => {
+      arena.flags[input.dataset.visual] = input.checked;
+      arena.dirty = true;
+    });
+  }
+  play.addEventListener('click', () => {
+    arena.flags.paused = !arena.flags.paused;
+    updateStats();
   });
+  reduced.addEventListener('change', event => {
+    if (event.matches) arena.flags.paused = true;
+    updateStats();
+  });
+  $('speed').addEventListener('change', event => { arena.flags.rate = Number(event.target.value); });
+  $('quality').addEventListener('change', event => arena.setQuality(event.target.value));
+  $('restart').addEventListener('click', () => arena.restart());
+  $('zoom-in').addEventListener('click', () => arena.zoom(.78));
+  $('zoom-out').addEventListener('click', () => arena.zoom(1.28));
+  for (const view of views) view.addEventListener('click', () => { arena.setView(view.dataset.view); updateStats(); });
+
+  function updateStats() {
+    const { queen, stats, signals } = colony;
+    const seconds = Math.floor(colony.time);
+    text('sim-time', `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`);
+    text('run-label', `Run ${colony.run}`);
+    text('adults', colony.workers.length);
+    text('brood-total', colony.brood.length);
+    const brood = [0, 0, 0];
+    for (const item of colony.brood) brood[item.stage]++;
+    for (const [stage, id] of ['egg-count', 'larva-count', 'pupa-count'].entries()) text(id, brood[stage]);
+    for (const kind of ['food', 'water']) {
+      $(`queen-${kind}`).value = queen[kind];
+      text(`queen-${kind}-value`, percent(queen[kind]));
+    }
+    text('worker-state', arena.selected?.state ?? 'Colony stopped');
+    $('world').dataset.paused = arena.flags.paused;
+    play.setAttribute('aria-label', arena.flags.paused ? 'Play simulation' : 'Pause simulation');
+    const glyph = play.querySelector('i');
+    const iconName = arena.flags.paused ? 'play' : 'pause';
+    if (glyph.dataset.icon !== iconName) {
+      glyph.dataset.icon = iconName;
+      glyph.innerHTML = icon(iconName);
+    }
+    for (const view of views) view.setAttribute('aria-pressed', arena.mode === view.dataset.view);
+    const failure = $('failure');
+    failure.hidden = !colony.failed;
+    text('failure', colony.failed ? `${colony.failed} · ${colony.settings.restart ? 'Restarting' : 'Run ended'}` : '');
+    text('hatched', stats.hatched);
+    text('policy-updates', stats.updates);
+    text('care-visits', stats.care);
+    text('deliveries', stats.delivered);
+    text('shared', stats.shared);
+    text('best-score', colony.best?.score.toFixed(1) ?? '—');
+    text('world-seed', colony.seed);
+    $('queen-food').title = `Need signal ${percent(signals.food)}`;
+    $('queen-water').title = `Need signal ${percent(signals.water)}`;
+    const selected = arena.selected;
+    const optionKey = colony.workers.map(worker => worker.id).join(',');
+    if (previousOptions !== optionKey) {
+      previousOptions = optionKey;
+      picker.replaceChildren(...colony.workers.map(worker => new Option(`Worker ${worker.id}`, worker.id)));
+    }
+    if (selected) {
+      if (picker.value !== String(selected.id)) picker.value = selected.id;
+      text('generation', selected.generation);
+      text('worker-reserves', `${percent(selected.food)} · ${percent(selected.water)}`);
+      text('weight-count', selected.weights.length);
+      text('worker-reward', selected.reward.toFixed(1));
+    } else {
+      for (const id of ['generation', 'worker-reserves', 'weight-count', 'worker-reward']) text(id, '—');
+    }
+    if (colony.best && lastBest !== colony.best) {
+      lastBest = colony.best;
+      storage(championKey, colony.best);
+    }
+  }
+  arena.onStats = updateStats;
+  updateStats();
 }
 
 const host = $('canvas-host');
 try {
-  const arena = new Arena(host, updateStats);
+  const arena = new ColonyArena(host, settings, 8241, storage(championKey));
   controls(arena);
-  arena.renderer.domElement.addEventListener('webglcontextlost', event => {
-    event.preventDefault();
-    setPaused(arena, true);
-  });
-  arena.renderer.domElement.addEventListener('webglcontextrestored', () => requestAnimationFrame(() => {
-    arena.renderer.shadowMap.needsUpdate = true;
-    arena.dirty = true;
-  }));
 } catch (error) {
   console.error(error);
-  const warning = document.createElement('p');
-  warning.id = 'render-message';
-  warning.textContent = 'The 3D arena needs WebGL 2. Try a current browser with hardware acceleration enabled.';
-  host.replaceChildren(warning);
-  $('sim-status').dataset.paused = true;
-  $('sim-status').querySelector('strong').textContent = '3D unavailable';
-  for (const button of document.querySelectorAll('.view-tools button, .transport button, .transport select, .guide-tools button, [data-terrain], #quality, .toggle-row input, .brain-panel button, .brain-panel select')) button.disabled = true;
+  const message = document.createElement('p');
+  message.textContent = 'The colony could not start. Reload Fire Ant Lab to try again.';
+  host.replaceChildren(message);
+  for (const control of document.querySelectorAll('main button, main select')) control.disabled = true;
 }
 
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {

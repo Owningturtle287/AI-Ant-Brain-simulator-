@@ -3,171 +3,135 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#151916">
-  <meta name="description" content="Observe a fire ant worker and explore its simulated brain as it forages.">
+  <meta name="theme-color" content="#171b16">
+  <meta name="description" content="An open-world fire ant colony with learning and inherited worker policies.">
   <link rel="icon" href="./icons/ant-192.png">
   <link rel="apple-touch-icon" href="./icons/apple-touch.png">
   <link rel="manifest" href="./manifest.webmanifest">
   <title>Fire Ant Lab | AI Ant Brain Simulator</title>
 </head>
 <body>
-  <header class="masthead">
-    <div class="brand">
-      <img src="./icons/ant-192.png" width="42" height="42" alt="">
-      <div><span>Fire Ant Lab</span><small>AI Ant Brain Simulator</small></div>
-    </div>
-    <div class="head-actions">
-      <button type="button" id="install" class="text-button" hidden><i data-icon="download"></i> <span>Install app</span></button>
-      <button type="button" id="open-help" class="text-button" aria-label="Open controls guide"><i data-icon="help"></i> <span>Controls</span></button>
-    </div>
-  </header>
-
-  <main>
-    <div class="page-intro">
-      <div>
-        <h1>Fire ant simulator</h1>
-        <p class="intro-copy">Watch a red imported fire ant forage and inspect the neural activity behind its movements.</p>
+  <main id="world" aria-label="Fire ant colony">
+    <div id="canvas-host"><p>Preparing the colony…</p></div>
+    <header class="toolbar">
+      <div class="brand">
+        <img src="./icons/ant-192.png" width="34" height="34" alt="">
+        <div><h1>Fire Ant Lab</h1><span id="run-label">Run 1</span><span id="render-mode" hidden> · Compatibility</span></div>
       </div>
-    </div>
+      <div class="toolbar-actions">
+        <button id="install" type="button" hidden>Install</button>
+        <button id="settings-button" type="button" aria-expanded="false" aria-controls="settings-panel"><i data-icon="settings"></i><span>Settings</span></button>
+      </div>
+    </header>
+    <section class="hud" aria-label="Colony totals">
+      <div class="census"><span>Workers <b id="adults">1</b></span><span>Brood <b id="brood-total">0</b></span></div>
+      <div class="queen-status" aria-label="Queen reserves">
+        <span>Queen</span>
+        <div class="reserve"><span><i class="resource food"></i>Food <b id="queen-food-value">94%</b></span><progress id="queen-food" aria-label="Queen food" max="1" value=".94"></progress></div>
+        <div class="reserve"><span><i class="resource water"></i>Water <b id="queen-water-value">94%</b></span><progress id="queen-water" aria-label="Queen water" max="1" value=".94"></progress></div>
+      </div>
+    </section>
 
-    <div class="workbench" data-inspector="brain">
-      <section class="simulation" aria-label="Interactive simulation">
-        <div class="stage" id="stage" aria-label="3D fire ant arena">
-          <div class="stage-overlay">
-            <div class="stage-state"><div class="status-chip" id="sim-status"><span></span><strong>Running</strong></div><span id="worker-state">Searching</span><span id="render-mode" hidden>Compatibility view</span></div>
-            <div class="view-tools" aria-label="Camera controls">
-              <button type="button" id="orbit" aria-label="Orbit" aria-pressed="true"><i data-icon="cube"></i><span>Orbit</span></button>
-              <button type="button" id="overhead" aria-label="Top" aria-pressed="false"><i data-icon="top"></i><span>Top</span></button>
-              <button type="button" id="side" aria-label="Side" aria-pressed="false"><i data-icon="side"></i><span>Side</span></button>
-              <button type="button" id="zoom-in" aria-label="Zoom in"><i data-icon="plus"></i></button>
-              <button type="button" id="zoom-out" aria-label="Zoom out"><i data-icon="minus"></i></button>
-            </div>
-          </div>
-          <div id="canvas-host" class="canvas-host"><p id="render-message">Preparing the 3D arena…</p></div>
-          <div class="guide-tools">
-            <p id="arena-hint"><i data-icon="pointer"></i><span>Drag to orbit · Pinch or scroll to zoom</span></p>
-            <button type="button" id="guide" aria-pressed="false"><i data-icon="target"></i><span>Guide ant</span></button>
-          </div>
-        </div>
-        <div class="transport">
-          <div class="transport-primary">
-            <button type="button" class="primary" id="play" aria-label="Pause simulation"><i data-icon="pause"></i><span>Pause</span></button>
-            <button type="button" class="icon-button" id="reset" aria-label="Reset simulation" title="Reset simulation"><i data-icon="reset"></i></button>
-          </div>
-          <div class="speed-control">
-            <label for="speed">Speed</label>
-            <select id="speed" aria-label="Simulation speed">
-              <option value=".25">0.25×</option>
-              <option value=".5">0.5×</option>
-              <option value="1" selected>1×</option>
-              <option value="2">2×</option>
-            </select>
-          </div>
-          <time id="sim-time" aria-label="Elapsed simulation time">00:00</time>
-        </div>
-      </section>
+    <p id="failure" class="failure" role="status" hidden></p>
+    <section class="observation" aria-label="Worker status">
+      <span class="pulse"></span><span id="worker-state">Assessing nest</span>
+    </section>
 
-      <aside class="panel" aria-label="Simulation inspector">
-        <div class="tabs" role="tablist" aria-label="Inspector views">
-          <button type="button" id="brain-tab" role="tab" aria-selected="true" aria-controls="brain-panel"><i data-icon="brain"></i> Brain</button>
-          <button type="button" id="specimen-tab" role="tab" aria-selected="false" aria-controls="specimen-panel" tabindex="-1"><i data-icon="ant"></i> Specimen</button>
-          <button type="button" id="terrain-tab" role="tab" aria-selected="false" aria-controls="terrain-panel" tabindex="-1"><i data-icon="terrain"></i> Terrain</button>
-        </div>
-        <section class="panel-content brain-panel" id="brain-panel" role="tabpanel" aria-labelledby="brain-tab">
-          <div class="brain-heading">
-            <h2>Worker brain</h2>
-            <span class="atlas-caption">Anatomical model</span>
-          </div>
-          <div class="neural-metrics">
-            <div><span>Model neurons</span><strong id="brain-count">250,000</strong></div>
-            <div><span>Firing this tick</span><strong id="brain-active">0</strong></div>
-            <div><span>Delivered</span><strong id="food-count">0</strong></div>
-          </div>
-          <div class="brain-stage">
-            <canvas id="brain-canvas" role="img" aria-label="Worker brain anatomical projection with a sample of live neurons and connections"></canvas>
-          </div>
-          <div class="atlas-tools">
-            <button type="button" id="brain-view" aria-pressed="false"><i data-icon="flip"></i><span>Rear view</span></button>
-            <button type="button" id="brain-links" aria-pressed="true"><i data-icon="joints"></i><span>Connections</span></button>
-          </div>
-          <div class="region-control"><label for="brain-region">Region</label><select id="brain-region"><option value="-1">Whole brain</option></select></div>
-          <div id="brain-description" class="brain-description">Bright dots show neurons firing. Tap a dot to see its connections.</div>
-          <div class="neuron-tools">
-            <button type="button" id="inspect-neuron">Inspect neuron</button>
-            <button type="button" id="clear-neuron" hidden>Clear selection</button>
-          </div>
-          <div class="neuron-detail" id="neuron-detail" hidden>
-            <strong id="neuron-name"></strong><span id="neuron-status"></span>
-            <ul id="neuron-sources" aria-label="Incoming modeled connections"></ul>
-          </div>
-          <div class="foraging-controls">
-            <h3>Foraging cues</h3>
-            <div class="atlas-tools">
-              <button type="button" id="place-food" aria-pressed="false"><i data-icon="target"></i><span>Place food</span></button>
-              <button type="button" id="show-trail" aria-pressed="false"><i data-icon="steps"></i><span>Show trail</span></button>
-              <button type="button" id="clear-trail">Clear trail</button>
-            </div>
-          </div>
-          <details class="model-notes">
-            <summary>Neuron estimates and sources</summary>
-            <p>The simulation allocates 250,000 neurons across seven populations. Population sizes and individual connections are model estimates. Dots show a sample of the modeled cells.</p>
-            <table><caption class="visually-hidden">Estimated model neurons per region</caption><thead><tr><th scope="col">Population</th><th scope="col">Model neurons</th></tr></thead><tbody id="region-counts"></tbody></table>
-            <p><a href="https://doi.org/10.1371/journal.pone.0083966" target="_blank" rel="noopener noreferrer">Fire-ant worker anatomy</a> · <a href="https://doi.org/10.1038/s41559-022-01784-1" target="_blank" rel="noopener noreferrer">Comparative brain cell atlas</a></p>
-          </details>
-        </section>
-        <section class="panel-content" id="specimen-panel" role="tabpanel" aria-labelledby="specimen-tab" hidden>
-          <span class="section-label">SPECIMEN</span>
-          <h2>Red imported fire ant</h2>
-          <p class="latin">Solenopsis invicta</p>
-          <div class="metrics">
-            <div><span>Body length</span><strong>3.5 <small>mm</small></strong></div>
-            <div><span>Feet in contact</span><strong id="foot-count">6 <small>/ 6</small></strong></div>
-          </div>
-          <div class="detail-heading"><h3>Body layers</h3><span>VIEW</span></div>
-          <label class="toggle-row">
-            <i data-icon="joints"></i>
-            <span><strong>Joint markers</strong><small>Show articulation points</small></span>
-            <input type="checkbox" id="joints" role="switch">
-          </label>
-          <label class="toggle-row">
-            <i data-icon="steps"></i>
-            <span><strong>Foot contacts</strong><small>Show planted feet</small></span>
-            <input type="checkbox" id="contacts" role="switch">
-          </label>
-          <label class="toggle-row">
-            <i data-icon="sting"></i>
-            <span><strong>Extend sting</strong><small>Inspect the retractable tip</small></span>
-            <input type="checkbox" id="sting" role="switch">
-          </label>
-        </section>
-        <section class="panel-content" id="terrain-panel" role="tabpanel" aria-labelledby="terrain-tab" hidden>
-          <span class="section-label">ARENA</span>
-          <h2>Terrain</h2>
-          <p class="terrain-copy">Change the surface under the ant’s feet.</p>
-          <div class="terrain-list" role="group" aria-label="Terrain presets">
-            <button type="button" data-terrain="loam" aria-pressed="true"><span class="terrain-sample loam"></span><span><strong>Forest loam</strong><small>Level ground</small></span><i data-icon="check"></i></button>
-            <button type="button" data-terrain="gravel" aria-pressed="false"><span class="terrain-sample gravel"></span><span><strong>Rocky ground</strong><small>Uneven footing</small></span><i data-icon="check"></i></button>
-            <button type="button" data-terrain="tunnel" aria-pressed="false"><span class="terrain-sample tunnel"></span><span><strong>Open tunnel</strong><small>Sloped banks and a narrow floor</small></span><i data-icon="check"></i></button>
-          </div>
-          <label class="quality" for="quality"><span>Graphics quality</span><select id="quality"><option value="auto">Auto</option><option value="high">High</option><option value="low">Battery saver</option></select></label>
-        </section>
-      </aside>
-    </div>
+    <nav class="transport" aria-label="Simulation and camera controls">
+      <div class="control-group">
+        <button id="play" class="primary icon" type="button" aria-label="Pause simulation"><i data-icon="pause"></i></button>
+        <label class="visually-hidden" for="speed">Simulation speed</label>
+        <select id="speed">
+          <option value="0.5">½×</option><option value="1" selected>1×</option><option value="2">2×</option>
+          <option value="4">4×</option><option value="8">8×</option><option value="16">16×</option><option value="32">32×</option>
+        </select>
+        <time id="sim-time" aria-label="Simulation time">00:00</time>
+      </div>
+      <div class="control-group camera-tools">
+        <button id="nest-view" data-view="nest" type="button" aria-pressed="true">Nest</button>
+        <button id="worker-view" data-view="worker" type="button" aria-pressed="false">Worker</button>
+        <button id="explore-view" data-view="explore" type="button" aria-pressed="false">Explore</button>
+        <button id="zoom-in" class="icon zoom" type="button" aria-label="Zoom in"><i data-icon="plus"></i></button>
+        <button id="zoom-out" class="icon zoom" type="button" aria-label="Zoom out"><i data-icon="minus"></i></button>
+      </div>
+    </nav>
 
-    <footer><span>Solenopsis invicta worker</span><span>Body, behavior &amp; brain</span></footer>
+    <aside id="settings-panel" class="drawer" aria-label="Colony settings" hidden>
+      <div class="drawer-top">
+        <h2>Colony settings</h2>
+        <button id="settings-close" class="icon" type="button" aria-label="Close settings"><i data-icon="close"></i></button>
+      </div>
+      <details id="colony-settings" open>
+        <summary>Lifecycle</summary>
+        <div class="drawer-content">
+          <label for="egg-seconds">Seconds between eggs</label><input type="number" id="egg-seconds" data-setting="eggSeconds" value="10" min="1" max="600" step="1">
+          <label for="stage-seconds">Seconds per brood stage</label><input type="number" id="stage-seconds" data-setting="stageSeconds" value="60" min="2" max="1200" step="1">
+          <label for="age-limit">Adult age limit <small>Seconds, 0 for unlimited</small></label><input type="number" id="age-limit" data-setting="ageLimit" value="0" min="0" max="100000" step="1">
+          <label for="need-rate">Food and water use</label><input type="number" id="need-rate" data-setting="needRate" value="1" min="0.1" max="10" step="0.1">
+          <label for="population-limit">Worker cap</label><input type="number" id="population-limit" data-setting="populationLimit" value="40" min="1" max="120" step="1">
+          <label for="auto-restart">Restart on failure</label><input type="checkbox" id="auto-restart" data-setting="restart" checked>
+          <dl class="ledger brood-ledger">
+            <div><dt>Eggs</dt><dd id="egg-count">0</dd></div>
+            <div><dt>Larvae</dt><dd id="larva-count">0</dd></div>
+            <div><dt>Pupae</dt><dd id="pupa-count">0</dd></div>
+          </dl>
+        </div>
+      </details>
+      <details>
+        <summary>World &amp; view</summary>
+        <div class="drawer-content">
+          <label for="resource-density">Resource density <small>Applies to new terrain</small></label><input type="number" id="resource-density" data-setting="resourceDensity" value="1" min="0" max="3" step="0.1">
+          <label for="resource-renewal">Resource renewal <small>Units per second, 0 for none</small></label><input type="number" id="resource-renewal" data-setting="resourceRenewal" value="0.085" min="0" max="2" step="0.005">
+          <label for="quality">Graphics</label><select id="quality"><option value="auto">Auto</option><option value="high">High</option><option value="low">Battery saver</option></select>
+          <label for="show-signals">Show queen need signal</label><input type="checkbox" id="show-signals" data-visual="signals" checked>
+          <label for="joints">Worker joint markers</label><input type="checkbox" id="joints" data-visual="joints">
+          <label for="contacts">Worker foot contacts</label><input type="checkbox" id="contacts" data-visual="contacts">
+          <label for="sting">Extend worker sting</label><input type="checkbox" id="sting" data-visual="sting">
+          <p class="hint">Drag to orbit. In Explore, use two fingers or right-drag to pan. Gold piles are food. Blue pools are water.</p>
+        </div>
+      </details>
+      <details id="training-details">
+        <summary id="training-summary">Training</summary>
+        <div class="drawer-content">
+          <label for="learn">Learn during this run</label><input type="checkbox" id="learn" data-setting="learning" checked>
+          <label for="mutation">Mutation strength</label><input type="number" id="mutation" data-setting="mutation" value="0.10" min="0" max="1" step="0.01">
+          <dl class="ledger">
+            <div><dt>Policy updates</dt><dd id="policy-updates">0</dd></div>
+            <div><dt>Hatched</dt><dd id="hatched">0</dd></div>
+            <div><dt>Brood care visits</dt><dd id="care-visits">0</dd></div>
+            <div><dt>Queen deliveries</dt><dd id="deliveries">0</dd></div>
+            <div><dt>Worker deliveries</dt><dd id="shared">0</dd></div>
+            <div><dt>Best run score</dt><dd id="best-score">—</dd></div>
+            <div><dt>World seed</dt><dd id="world-seed">8241</dd></div>
+          </dl>
+          <button class="wide" type="button" id="restart">Start new run</button>
+        </div>
+      </details>
+      <details id="brain-details">
+        <summary>Worker &amp; brain</summary>
+        <div class="drawer-content brain-panel" id="brain-panel">
+          <label for="worker-picker">Inspect worker</label><select id="worker-picker"><option value="1">Worker 1</option></select>
+          <dl class="ledger">
+            <div><dt>Generation</dt><dd id="generation">0</dd></div>
+            <div><dt>Food and water</dt><dd id="worker-reserves">—</dd></div>
+            <div><dt>Policy weights</dt><dd id="weight-count">66</dd></div>
+            <div><dt>Reward earned</dt><dd id="worker-reward">0.0</dd></div>
+          </dl>
+          <p class="hint">The worker’s learned policy selects tasks. The spiking view shows a separate anatomical readout of its sensor and movement signals.</p>
+          <div class="neural-counts"><span>Model neurons <b id="brain-count">250,000</b></span><span>Firing <b id="brain-active">0</b></span></div>
+          <canvas id="brain-canvas" role="img" aria-label="Anatomical projection with sampled model firing and connections"></canvas>
+          <div class="brain-controls">
+            <button type="button" id="brain-view" aria-pressed="false">Rear view</button>
+            <button type="button" id="brain-links" aria-pressed="true">Connections</button>
+          </div>
+          <label for="brain-region">Brain region</label><select id="brain-region"><option value="-1">Whole brain</option></select>
+          <p id="brain-description" class="hint">Tap a dot to inspect a simulated neuron.</p>
+          <div class="neuron-detail" id="neuron-detail" hidden><strong id="neuron-name"></strong> <span id="neuron-status"></span><ul id="neuron-sources"></ul></div>
+        </div>
+      </details>
+      <p class="drawer-footer">Egg → larva → pupa → adult</p>
+    </aside>
   </main>
-
-  <dialog id="help">
-    <div class="dialog-heading"><h2>Controls</h2><button type="button" id="close-help" class="icon-button" aria-label="Close controls"><i data-icon="close"></i></button></div>
-    <dl>
-      <dt>Look around</dt><dd>Drag the arena to orbit. Use Top or Side to inspect the body from that angle. Pinch, scroll, or use + and − to zoom.</dd>
-      <dt>Guide the ant</dt><dd>Turn on Guide ant and tap a patch of ground. You can also steer with the arrow keys while the arena has focus.</dd>
-      <dt>Watch the brain</dt><dd>Choose a region in the Brain tab. Bright dots show modeled activity and the connection lines show recent signals. Pause or slow down to inspect a neuron.</dd>
-      <dt>Change a foraging cue</dt><dd>Use Place food in the Brain tab, then tap the ground. Show trail reveals the scent, and Clear trail lets the worker search without the seeded trail.</dd>
-      <dt>Inspect a step</dt><dd>Pause or slow the simulation, then turn on joint markers or foot contacts in the Specimen tab.</dd>
-    </dl>
-    <p id="install-help">On iPhone, open this page in Safari and use Share → Add to Home Screen. On Android, open Chrome’s menu and choose Install or Add to Home screen.</p>
-  </dialog>
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

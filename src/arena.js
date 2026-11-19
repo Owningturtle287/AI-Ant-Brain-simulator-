@@ -1,330 +1,162 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { arenaLimit, AntMotion, terrainHeight } from './motion.js';
-import { randomGenerator, WorkerRig } from './worker.js';
+import { Colony, colonyStep } from './colony.js';
+import { ColonyScene } from './colony-scene.js';
 import { SoftwareView } from './software-view.js';
-import { ForagingWorker } from './foraging.js';
-import { ForagingScene } from './foraging-scene.js';
+import { WorkerBrain } from './brain.js';
 
-const origin = new THREE.Vector3();
-const worldUp = new THREE.Vector3(0, 1, 0);
-const terrainColors = { loam: '#94775a', gravel: '#8d8172', tunnel: '#826a4f' };
-const scatterPalette = ['#877260', '#715744', '#584738', '#766450', '#b18e68', '#54483e', '#c1a684'];
+const cameraOffsets = {
+  nest: new THREE.Vector3(5.7, 9.4, 12.2),
+  worker: new THREE.Vector3(2.8, 3.7, 6.3),
+  explore: new THREE.Vector3(4.6, 13.3, 16.1),
+};
 
-function makeTerrain(scene, renderer) {
-  const texture = new THREE.TextureLoader().load('./textures/loam.webp');
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.wrapS = texture.wrapT = THREE.MirroredRepeatWrapping;
-  texture.repeat.set(13, 13);
-  texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
-
-  const material = new THREE.MeshStandardMaterial({
-    map: texture, bumpMap: texture, bumpScale: .027, color: terrainColors.loam, roughness: .94,
-  });
-  const geometry = new THREE.PlaneGeometry(34, 34, 220, 220).rotateX(-Math.PI / 2);
-  const floor = new THREE.Mesh(geometry, material);
-  floor.receiveShadow = true;
-  scene.add(floor);
-
-  const stone = new THREE.IcosahedronGeometry(1, 1);
-  const position = stone.attributes.position;
-  for (let index = 0; index < position.count; index++) {
-    const x = position.getX(index), y = position.getY(index), z = position.getZ(index);
-    const variation = 1 + .2 * Math.sin(x * 14 + z * 8) * Math.cos(y * 13 + x * 6);
-    position.setXYZ(index, x * variation, y * variation, z * variation);
-  }
-  stone.computeVertexNormals();
-  const rocks = new THREE.InstancedMesh(stone, new THREE.MeshStandardMaterial({
-    roughness: .96, flatShading: true, color: '#ffffff',
-  }), 760);
-  rocks.castShadow = true;
-  rocks.receiveShadow = true;
-  scene.add(rocks);
-  const scratch = new THREE.Object3D();
-  const tint = new THREE.Color();
-
-  function set(preset) {
-    const points = geometry.attributes.position;
-    for (let i = 0; i < points.count; i++) {
-      const x = points.getX(i), z = points.getZ(i);
-      points.setY(i, terrainHeight(preset, x, z));
-    }
-    points.needsUpdate = true;
-    geometry.computeVertexNormals();
-    material.color.set(terrainColors[preset]);
-    const seeded = randomGenerator(429);
-    rocks.count = preset === 'gravel' ? 760 : 580;
-    for (let i = 0; i < rocks.count; i++) {
-      const x = (seeded() - .5) * 23;
-      const z = (seeded() - .5) * 23;
-      const floorHeight = terrainHeight(preset, x, z);
-      // Keep large pieces outside the walking area. Small grit sits within the contact surface.
-      const edge = Math.max(Math.abs(x), Math.abs(z)) > 7.75 || (preset === 'tunnel' && floorHeight > .92);
-      const size = edge ? .05 + seeded() ** 3 * .55 : .012 + seeded() ** 3 * (preset === 'gravel' ? .084 : .059);
-      scratch.position.set(x, floorHeight + size * (edge ? .11 : -.14), z);
-      scratch.scale.set(size * (1 + seeded()), size * (.40 + seeded() * .27), size * (.64 + seeded() * .57));
-      scratch.rotation.set(seeded(), seeded() * Math.PI * 2, seeded());
-      scratch.updateMatrix();
-      rocks.setMatrixAt(i, scratch.matrix);
-      tint.set(scatterPalette[Math.floor(seeded() * scatterPalette.length)]).multiplyScalar(.78 + seeded() * .22);
-      rocks.setColorAt(i, tint);
-    }
-    rocks.instanceMatrix.needsUpdate = true;
-    if (rocks.instanceColor) rocks.instanceColor.needsUpdate = true;
-    rocks.computeBoundingSphere();
-  }
-  return { floor, set };
-}
-
-function contactShadows(scene) {
-  const size = 48;
-  const pixels = new Uint8Array(size * size * 4);
-  for (let i = 0; i < size * size; i++) {
-    const radius = Math.hypot((i % size + .5) * 2 / size - 1, (Math.floor(i / size) + .5) * 2 / size - 1);
-    pixels.set([255, 255, 255, Math.round(255 * Math.max(0, 1 - radius) ** 1.62)], i * 4);
-  }
-  const map = new THREE.DataTexture(pixels, size, size);
-  map.magFilter = THREE.LinearFilter;
-  map.needsUpdate = true;
-  const geometry = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
-  const material = new THREE.MeshBasicMaterial({ color: '#1e110b', map, transparent: true, opacity: .66, depthWrite: false });
-  return [
-    [-1.36, 1.7, .98], [-.2, 1.42, .74], [.91, 1.36, .84],
-  ].map(([offset, width, length]) => {
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.scale.set(width, 1, length);
-    scene.add(mesh);
-    return { mesh, offset };
-  });
-}
-
-export class Arena {
-  constructor(host, onStats) {
+export class ColonyArena {
+  constructor(host, settings, seed, history) {
     this.host = host;
-    this.onStats = onStats;
-    this.motion = new AntMotion();
-    this.worker = new ForagingWorker();
-    this.flags = { paused: false, joints: false, contacts: false, sting: false, trail: false, rate: 1, quality: 'auto', guide: false, food: false };
-    this.stingExtension = 0;
+    this.colony = new Colony(settings, seed, history);
+    this.flags = { paused: false, rate: 1, signals: true, joints: false, contacts: false, sting: false };
+    this.brainInputs = { odor: [0, 0], contact: [0, 0], vision: 0, touch: 0, turn: 0, pace: 0 };
+    this.mode = 'nest';
+    this.workerId = 1;
+    this.accumulated = 0;
+    this.lastFrame = 0;
     this.lastStamp = 0;
-    this.accumulator = 0;
-    this.lastUIUpdate = -Infinity;
-    this.view = 'orbit';
+    this.lastUI = -Infinity;
+    this.lastBrain = -Infinity;
+    this.dirty = true;
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color('#2a221b');
-    this.scene.fog = new THREE.FogExp2('#2b241d', .051);
-    this.camera = new THREE.PerspectiveCamera(36, 1, .07, 72);
+    this.scene.background = new THREE.Color('#3f3326');
+    this.scene.fog = new THREE.FogExp2('#403529', .034);
+    this.camera = new THREE.PerspectiveCamera(43, 1, .06, 134);
     const surface = document.createElement('canvas');
-    const context = surface.getContext('webgl2', { antialias: true, alpha: false });
+    const context = surface.getContext('webgl2', { alpha: false, antialias: true });
     this.software = !context;
     this.renderer = context ? new THREE.WebGLRenderer({ canvas: surface, context }) : new SoftwareView();
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.24;
-    this.renderer.shadowMap.enabled = true;
+    this.renderer.toneMappingExposure = 1.19;
+    this.renderer.shadowMap.enabled = !this.software;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.shadowMap.autoUpdate = false;
     const canvas = this.renderer.domElement;
     canvas.tabIndex = 0;
-    canvas.setAttribute('aria-label', '3D simulation. Arrow keys steer the ant.');
-    this.host.replaceChildren(canvas);
-
+    canvas.setAttribute('aria-label', 'Interactive 3D colony world');
+    host.replaceChildren(canvas);
     this.orbit = new OrbitControls(this.camera, canvas);
     this.orbit.enableDamping = true;
-    this.orbit.dampingFactor = .10;
-    this.orbit.enablePan = false;
-    this.orbit.minPolarAngle = .065;
-    this.orbit.maxPolarAngle = Math.PI * .474;
-    this.orbit.minDistance = 2.3;
-    this.orbit.maxDistance = 16.5;
-    this.orbit.rotateSpeed = .74;
-
-    if (!this.software) {
-      const studio = new RoomEnvironment();
-      const generator = new THREE.PMREMGenerator(this.renderer);
-      this.scene.environment = generator.fromScene(studio, .08).texture;
-      this.scene.environmentIntensity = .86;
-      studio.dispose();
-      generator.dispose();
-    }
-
-    this.scene.add(new THREE.HemisphereLight('#e8e0d2', '#836250', 1.2));
-    this.sun = new THREE.DirectionalLight('#ffe2bd', 3.4);
-    this.sun.position.set(3.3, 6.0, -4.0);
-    this.sun.castShadow = true;
-    this.sun.shadow.camera.near = .2;
-    this.sun.shadow.camera.far = 27;
-    this.sun.shadow.normalBias = .025;
-    this.sun.shadow.bias = -.00016;
-    this.scene.add(this.sun, this.sun.target);
-    const bounce = new THREE.DirectionalLight('#f9ecde', 1.55);
-    bounce.position.set(-2.7, 3.5, 4.7);
-    this.scene.add(bounce);
-
-    this.terrain = makeTerrain(this.scene, this.renderer);
-    this.terrain.set(this.motion.terrain);
-    this.shadows = this.software ? [] : contactShadows(this.scene);
-    this.rig = new WorkerRig(this.scene, this.motion.legs);
-    this.rig.update(this.motion, false, false);
-    this.foragingScene = new ForagingScene(this.scene, this.rig.head);
-    this.raycaster = new THREE.Raycaster();
-    this.pointer = new THREE.Vector2();
-    this.compass = new THREE.Mesh(
-      new THREE.RingGeometry(.14, .18, 32).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ color: '#ffcf96', side: THREE.DoubleSide, depthWrite: false }),
-    );
-    this.compass.visible = false;
-    this.scene.add(this.compass);
-
-    this.focusPoint = new THREE.Vector3();
-    this.shift = new THREE.Vector3();
-    this.lastShadow = -Infinity;
-    this.dirty = true;
-    this.setQuality('auto');
-    this.setView('orbit');
-    this.resizeObserver = new ResizeObserver(() => this.resize());
-    this.resizeObserver.observe(this.host);
+    this.orbit.dampingFactor = .14;
+    this.orbit.maxPolarAngle = Math.PI * .464;
+    this.orbit.minDistance = 2.8;
+    this.orbit.maxDistance = 48;
+    this.orbit.rotateSpeed = .68;
+    this.orbit.panSpeed = .88;
     this.orbit.addEventListener('change', () => { this.dirty = true; });
-    this.installPointerControls(canvas);
-    this.keys = new Set();
-    canvas.addEventListener('keydown', event => this.keyboard(event, true));
-    canvas.addEventListener('keyup', event => this.keyboard(event, false));
-    canvas.addEventListener('blur', () => this.clearKeys());
-    window.addEventListener('blur', () => this.clearKeys());
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) this.clearKeys();
-      this.lastStamp = 0;
+    if (!this.software) {
+      const room = new RoomEnvironment();
+      const lighting = new THREE.PMREMGenerator(this.renderer);
+      this.scene.environment = lighting.fromScene(room, .08).texture;
+      this.scene.environmentIntensity = .76;
+      room.dispose();
+      lighting.dispose();
+    }
+    this.scene.add(new THREE.HemisphereLight('#f4e9d6', '#786344', 1.61));
+    this.sun = new THREE.DirectionalLight('#ffe4b9', 3.2);
+    this.sun.castShadow = !this.software;
+    this.sun.shadow.mapSize.set(1024, 1024);
+    this.sun.shadow.camera.near = .15;
+    this.sun.shadow.camera.far = 52;
+    this.sun.shadow.normalBias = .028;
+    this.sun.shadow.bias = -.00019;
+    this.scene.add(this.sun, this.sun.target);
+    const fill = new THREE.DirectionalLight('#e6ebec', .86);
+    fill.position.set(-4, 5, 4);
+    this.scene.add(fill);
+    this.lowPower = this.software || matchMedia('(pointer: coarse)').matches;
+    this.objects = new ColonyScene(this.scene, this.renderer, this.software, this.lowPower);
+    this.track = new THREE.Vector3();
+    this.shift = new THREE.Vector3();
+    this.presentWorld = null;
+    this.setQuality('auto');
+    this.setView('nest');
+    this.objects.setWorld(this.colony.map, this.orbit.target);
+    this.presentWorld = this.colony.map;
+    new ResizeObserver(() => this.resize()).observe(host);
+    document.addEventListener('visibilitychange', () => { this.lastStamp = 0; this.dirty = true; });
+    canvas.addEventListener('webglcontextlost', event => {
+      event.preventDefault();
+      this.flags.paused = true;
+      this.onStats?.();
+    });
+    canvas.addEventListener('webglcontextrestored', () => {
+      this.renderer.shadowMap.needsUpdate = true;
       this.dirty = true;
     });
-    this.textureRefresh = window.setTimeout(() => { this.dirty = true; }, 550);
     this.renderer.setAnimationLoop(stamp => this.frame(stamp));
+    window.setTimeout(() => { this.dirty = true; }, 600);
   }
 
-  setTerrain(preset) {
-    this.motion.terrain = preset;
-    this.terrain.set(preset);
-    this.reset();
+  get selected() {
+    return this.colony.workers.find(worker => worker.id === this.workerId) ?? this.colony.workers[0];
   }
 
-  reset() {
-    this.motion.reset();
-    this.worker.reset();
-    this.clearKeys();
-    this.lastUIUpdate = -Infinity;
-    this.accumulator = 0;
-    this.compass.visible = false;
-    this.dirty = true;
-    this.renderer.shadowMap.needsUpdate = true;
-    this.setView(this.view);
-  }
-
-  installPointerControls(canvas) {
-    let press = null;
-    const fingers = new Set();
-    canvas.addEventListener('pointerdown', event => {
-      fingers.add(event.pointerId);
-      press = event.button === 0 && fingers.size === 1 ? [event.clientX, event.clientY, event.pointerId] : null;
-    });
-    canvas.addEventListener('pointercancel', event => {
-      fingers.delete(event.pointerId);
-      press = null;
-    });
-    canvas.addEventListener('lostpointercapture', event => {
-      fingers.delete(event.pointerId);
-      if (press?.[2] === event.pointerId) press = null;
-    });
-    canvas.addEventListener('pointerup', event => {
-      fingers.delete(event.pointerId);
-      if ((this.flags.guide || this.flags.food) && press?.[2] === event.pointerId &&
-          Math.hypot(press[0] - event.clientX, press[1] - event.clientY) < 8) {
-        const box = canvas.getBoundingClientRect();
-        this.pointer.set((event.clientX - box.left) / box.width * 2 - 1, 1 - (event.clientY - box.top) / box.height * 2);
-        this.raycaster.setFromCamera(this.pointer, this.camera);
-        const point = this.raycaster.intersectObject(this.terrain.floor)[0]?.point;
-        if (point && this.flags.food) {
-          this.worker.placeFood(point.x, point.z);
-          this.dirty = true;
-          this.renderer.shadowMap.needsUpdate = true;
-          this.onFoodPlaced?.();
-        } else if (point) {
-          this.motion.steerTo(point.x, point.z);
-          const [x, z] = this.motion.destination;
-          const y = terrainHeight(this.motion.terrain, x, z);
-          this.compass.position.set(x, y + .048, z);
-          this.compass.visible = true;
-          this.dirty = true;
-        }
-      }
-      press = null;
-    });
-  }
-
-  keyboard(event, pressed) {
-    const vectors = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
-    if (!vectors[event.key]) return;
-    event.preventDefault();
-    if (pressed) this.keys.add(event.key);
-    else this.keys.delete(event.key);
-    let x = 0;
-    let z = 0;
-    for (const key of this.keys) {
-      x += vectors[key][0];
-      z += vectors[key][1];
-    }
-    if (x || z) {
-      this.camera.getWorldDirection(this.shift);
-      this.shift.y = 0;
-      this.shift.normalize();
-      this.motion.manual = [x * -this.shift.z - z * this.shift.x, x * this.shift.x - z * this.shift.z];
-    } else {
-      this.motion.manual = null;
-    }
-  }
-
-  clearKeys() {
-    this.keys?.clear();
-    this.motion.manual = null;
-  }
-
-  setQuality(quality) {
-    this.flags.quality = quality;
-    this.lowPower = quality === 'low' || (quality === 'auto' && matchMedia('(pointer: coarse)').matches);
-    const ratio = quality === 'high' ? 2 : this.lowPower ? 1.20 : 1.65;
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, ratio));
-    const size = this.lowPower ? 768 : 1536;
-    this.sun.shadow.mapSize.set(size, size);
-    this.sun.shadow.map?.dispose();
-    this.sun.shadow.map = null;
-    this.renderer.shadowMap.needsUpdate = true;
-    this.resize();
-  }
-
-  resize() {
-    const width = this.host.clientWidth;
-    const height = this.host.clientHeight;
-    if (!width || !height) return;
-    this.camera.aspect = width / height;
-    this.camera.fov = this.camera.aspect < 1 ? 44 : 36;
-    this.camera.updateProjectionMatrix();
-    this.renderer.setSize(width, height, false);
+  inspect(id) {
+    this.workerId = id;
+    this.brain?.reset();
+    this.onBrain?.();
+    this.lastBrain = -Infinity;
     this.dirty = true;
   }
 
-  setView(view) {
-    this.view = view;
-    this.sideHeading = this.motion.heading;
-    this.orbit.target.set(this.motion.x, this.motion.bodyPose().height, this.motion.z);
-    if (view === 'top') {
-      this.camera.position.copy(this.orbit.target).add(new THREE.Vector3(.07, 6.7, .46));
-    } else if (view === 'side') {
-      const radius = this.camera.aspect < 1 ? 5.9 : 5.5;
-      this.camera.position.copy(this.orbit.target).add(new THREE.Vector3(
-        Math.sin(this.motion.heading) * radius, .56, Math.cos(this.motion.heading) * radius,
-      ));
-    } else {
-      const narrow = this.camera.aspect < 1.17;
-      this.camera.position.copy(this.orbit.target).add(narrow ? new THREE.Vector3(3.0, 3.0, 5.8) : new THREE.Vector3(2.55, 2.68, 5.48));
+  enableBrain(enabled) {
+    if (enabled && !this.brain) this.brain = new WorkerBrain();
+    this.brainEnabled = enabled;
+    this.lastBrain = -Infinity;
+  }
+
+  updateBrain() {
+    const agent = this.selected;
+    if (!agent) return;
+    if (this.brainWorkerId !== agent.id) {
+      this.brain.reset();
+      this.brainWorkerId = agent.id;
     }
+    const { turn, speed } = agent;
+    const signal = this.colony.signals;
+    const input = this.brainInputs;
+    input.odor[0] = Math.min(1, Math.max(0, .25 + turn * .27 + signal.food * .4));
+    input.odor[1] = Math.min(1, Math.max(0, .25 - turn * .27 + signal.water * .4));
+    input.vision = Math.min(1, .08 + speed * .30);
+    input.touch = Number(agent.state === 'Eating' || agent.state === 'Drinking' || agent.state === 'Tending brood');
+    input.contact[0] = input.contact[1] = input.touch * .7;
+    input.turn = turn / 2;
+    input.pace = Math.min(1, speed / 2);
+    this.brain.step(input);
+  }
+
+  restart(newWorld = true) {
+    this.colony.restart(newWorld);
+    this.prepareRun();
+  }
+
+  prepareRun() {
+    this.workerId = 1;
+    this.accumulated = 0;
+    this.brain?.reset();
+    this.onBrain?.();
+    this.setView('nest');
+    this.objects.setWorld(this.colony.map, this.orbit.target);
+    this.presentWorld = this.colony.map;
+    this.onStats?.();
+    this.dirty = true;
+  }
+
+  setView(mode) {
+    this.mode = mode;
+    const worker = mode === 'worker' ? this.selected : null;
+    this.orbit.target.set(worker?.x ?? 0, worker ? .42 : .38, worker?.z ?? 0);
+    this.camera.position.copy(this.orbit.target).add(cameraOffsets[mode]);
+    this.orbit.enablePan = mode === 'explore';
     this.orbit.update();
     this.dirty = true;
   }
@@ -337,71 +169,75 @@ export class Arena {
     this.dirty = true;
   }
 
+  setQuality(quality) {
+    this.lowPower = this.software || quality === 'low' || (quality !== 'high' && matchMedia('(pointer: coarse)').matches);
+    this.objects.lowPower = this.lowPower;
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, this.lowPower ? 1.25 : 1.65));
+    this.resize();
+    this.dirty = true;
+  }
+
+  resize() {
+    const width = this.host.clientWidth, height = this.host.clientHeight;
+    if (!width || !height) return;
+    this.camera.aspect = width / height;
+    this.camera.fov = this.camera.aspect < .88 ? 49 : 40;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(width, height, false);
+    this.dirty = true;
+  }
+
   frame(stamp) {
     if (document.hidden) return;
-    const dt = this.lastStamp ? Math.min(.05, (stamp - this.lastStamp) / 1000) : 0;
+    const dt = this.lastStamp ? Math.min(.18, (stamp - this.lastStamp) / 1000) : 0;
     this.lastStamp = stamp;
     if (!this.flags.paused) {
-      this.accumulator += dt * this.flags.rate;
-      const step = 1 / 120;
-      while (this.accumulator >= step) {
-        const motor = this.worker.step(step, this.motion);
-        this.motion.step(step, motor);
-        this.accumulator -= step;
+      this.accumulated += dt * this.flags.rate;
+      while (this.accumulated + 1e-7 >= colonyStep) {
+        this.accumulated -= colonyStep;
+        this.colony.step();
+        if (this.presentWorld !== this.colony.map) this.prepareRun();
       }
       this.dirty = true;
     }
-    const stingTarget = this.flags.sting ? 1 : 0;
-    const extension = THREE.MathUtils.damp(this.stingExtension, stingTarget, 15, dt);
-    const stingExtension = Math.abs(stingTarget - extension) < .002 ? stingTarget : extension;
-    if (stingExtension !== this.stingExtension) {
-      this.stingExtension = stingExtension;
-      this.renderer.shadowMap.needsUpdate = true;
-      this.dirty = true;
+    if (stamp - this.lastUI > 185) {
+      this.onStats?.();
+      this.lastUI = stamp;
     }
-    this.rig.update(this.motion, this.flags.joints, this.flags.contacts, this.stingExtension);
-    const cosine = Math.cos(this.motion.heading);
-    const sine = Math.sin(this.motion.heading);
-    for (const { mesh, offset } of this.shadows) {
-      const x = this.motion.x + cosine * offset;
-      const z = this.motion.z - sine * offset;
-      mesh.position.set(x, terrainHeight(this.motion.terrain, x, z) + .04, z);
-      mesh.rotation.y = this.motion.heading;
+    if (this.brainEnabled && !this.flags.paused && stamp - this.lastBrain > 66) {
+      this.updateBrain();
+      this.onBrain?.();
+      this.lastBrain = stamp;
     }
-    if (this.view === 'side' && this.sideHeading !== this.motion.heading) {
-      const offset = this.motion.heading - this.sideHeading;
-      this.camera.position.sub(this.orbit.target).applyAxisAngle(worldUp, offset).add(this.orbit.target);
-      this.sideHeading = this.motion.heading;
-      this.dirty = true;
-    }
-    this.focusPoint.set(this.motion.x + .12, this.motion.bodyPose().height * .82, this.motion.z);
-    this.shift.subVectors(this.focusPoint, this.orbit.target).multiplyScalar(1 - Math.exp(-8 * dt));
-    if (this.shift.lengthSq() > .00000001) {
-      this.orbit.target.add(this.shift);
-      this.camera.position.add(this.shift);
-      this.dirty = true;
+    if (this.mode === 'worker' && this.selected) {
+      const { x, z } = this.selected;
+      this.track.set(x, this.colony.map.height(x, z) + .41, z);
+      this.shift.subVectors(this.track, this.orbit.target).multiplyScalar(1 - Math.exp(-8 * dt));
+      if (this.shift.lengthSq() > .000001) {
+        this.orbit.target.add(this.shift);
+        this.camera.position.add(this.shift);
+        this.dirty = true;
+      }
     }
     this.orbit.update();
-
-    if (stamp - this.lastUIUpdate > 110) {
-      this.onStats(this.motion.clock, this.motion.legs.filter(leg => !leg.swinging).length);
-      this.onBrainStats?.();
-      this.lastUIUpdate = stamp;
-    }
-    this.onFrame?.();
-    if (!this.dirty) return;
-    this.foragingScene.update(this.worker, this.motion.terrain, this.flags.trail);
-    if ((!this.flags.paused || this.renderer.shadowMap.needsUpdate) && stamp - this.lastShadow > (this.lowPower ? 63 : 30)) {
-      this.sun.target.position.set(this.motion.x, 0, this.motion.z);
-      this.sun.position.copy(this.sun.target.position).add(new THREE.Vector3(3.3, 6.0, -4.0));
-      const cam = this.sun.shadow.camera;
-      cam.left = cam.bottom = -4.6;
-      cam.right = cam.top = 4.6;
-      cam.updateProjectionMatrix();
+    const renderPeriod = this.software ? 38 : this.lowPower ? 30 : 21;
+    if (!this.dirty || (this.lastFrame && stamp - this.lastFrame < renderPeriod)) return;
+    const elapsed = this.lastFrame ? (stamp - this.lastFrame) / 1000 : 0;
+    this.lastFrame = stamp;
+    this.objects.update(this.colony, this.orbit.target, this.selected,
+      this.flags.paused ? 0 : elapsed * this.flags.rate, this.flags, Math.max(0, this.accumulated / colonyStep));
+    if (!this.software && (!this.lastShadow || stamp - this.lastShadow > (this.lowPower ? 95 : 65))) {
+      const target = this.orbit.target;
+      this.sun.target.position.set(target.x, 0, target.z);
+      this.sun.position.set(target.x + 8.4, 14.5, target.z - 12.7);
+      const shadow = this.sun.shadow.camera;
+      shadow.left = shadow.bottom = -11;
+      shadow.right = shadow.top = 11;
+      shadow.updateProjectionMatrix();
       this.renderer.shadowMap.needsUpdate = true;
       this.lastShadow = stamp;
     }
-    this.renderer.render(this.scene, this.camera, this.motion);
+    this.renderer.render(this.scene, this.camera, this.objects.queenMotion);
     this.dirty = false;
   }
 }
