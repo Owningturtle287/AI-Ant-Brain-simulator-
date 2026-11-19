@@ -38,8 +38,9 @@ try {
   await desktop.locator('#settings-close').click();
   await desktop.locator('#speed').selectOption('32');
   await desktop.locator('#play').click();
-  await desktop.waitForFunction(() => Number(document.querySelector('#adults').textContent) > 1, null, { timeout: 30_000 });
+  await desktop.waitForFunction(() => Number(document.querySelector('#adults').textContent) > 5, null, { timeout: 30_000 });
   await desktop.locator('#play').click();
+  await desktop.screenshot({ path: 'browser-results/colony-workers.png' });
   await desktop.locator('#settings-button').click();
   await desktop.locator('#training-summary').click();
   assert.ok(Number(await desktop.locator('#hatched').textContent()) > 0);

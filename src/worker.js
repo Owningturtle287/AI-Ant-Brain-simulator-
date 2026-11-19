@@ -5,8 +5,29 @@ import { anatomy, sculpt } from './sculpt.js';
 const up = new THREE.Vector3(0, 1, 0);
 const axis = new THREE.Vector3(1, 0, 0);
 const markerGeometry = new THREE.SphereGeometry(1, 12, 8);
+const footRing = new THREE.RingGeometry(.049, .061, 20);
 const antennaLengths = [.485, .089, .061, .059, .055, .055, .056, .060, .094, .137];
+const feelerReach = antennaLengths.slice(1).reduce((total, length) => total + length, 0);
 const tarsalEnds = [.37, .56, .72, .86, 1];
+const sharedGeometry = new Map();
+let sharedMaterials;
+
+function reuseGeometry(key, factory) {
+  if (!sharedGeometry.has(key)) sharedGeometry.set(key, factory());
+  return sharedGeometry.get(key);
+}
+
+function shellGeometry(name, radial, axial, compact) {
+  if (compact) {
+    radial = Math.max(6, Math.round(radial * .55));
+    axial = Math.max(5, Math.round(axial * .53));
+  }
+  return reuseGeometry(`shell/${name}/${radial}/${axial}`, () => {
+    const geometry = sculpt(anatomy[name], radial, axial);
+    geometry.userData.slimProfile = ['coxa', 'trochanter', 'femur', 'tibia', 'tarsomere', 'scape', 'funiculus', 'club', 'clubTip'].includes(name);
+    return geometry;
+  });
+}
 
 export function randomGenerator(seed) {
   return () => {
@@ -105,6 +126,13 @@ function mesh(parent, geometry, material) {
   parent.add(part);
   return part;
 }
+
+const feelTarget = new THREE.Vector3();
+const feelDirection = new THREE.Vector3();
+const feelPole = new THREE.Vector3();
+const feelElbow = new THREE.Vector3();
+const feelOuter = new THREE.Vector3();
+const reverseFeeler = new THREE.Quaternion();
 
 // Sample the actual shell instead of distributing hairs inside a bounding sphere.
 function hairGeometry(shell, count, length, seed, onLimb = false) {
@@ -261,29 +289,36 @@ function solveKnee(base, target, joint, rig, leg, swing, dt) {
 }
 
 export class WorkerRig {
-  constructor(scene, legs) {
-    this.material = materials();
+  constructor(scene, legs, compact = false) {
+    this.compact = compact;
+    this.material = sharedMaterials ??= materials();
     const m = this.material;
     this.root = group(scene);
     this.body = group(this.root);
     this.addShell(this.body, 'mesosoma', m.mesosoma, 26, 52, 152, .039, 45);
 
     this.head = group(this.body, .585, .124);
-    mesh(this.head, sculpt(anatomy.neck, 14, 18), m.hinge).position.set(-.047, -.043, 0);
+    mesh(this.head, shellGeometry('neck', 14, 18, compact), m.hinge).position.set(-.047, -.043, 0);
     this.addShell(this.head, 'head', m.head, 34, 54, 203, .039, 63);
     this.headSamples = [.25, .43, .58, .70, .76].flatMap(x =>
       [Math.PI - .60, Math.PI, Math.PI + .60].map(angle => anatomy.head.surface(x, angle)));
     this.headSamples.push(new THREE.Vector3(.89, -.287, 0));
     this.jaws = [];
     this.antennae = [];
-    const blade = sculpt(anatomy.mandible, 24, 40);
-    const antennalShells = ['scape', 'funiculus', 'club', 'clubTip'].map(name => sculpt(anatomy[name], 12, 10));
+    const blade = shellGeometry('mandible', 24, 40, compact);
+    const antennalShells = ['scape', 'funiculus', 'club', 'clubTip'].map(name => shellGeometry(name, 12, 10, compact));
     for (const side of [-1, 1]) {
       const jaw = group(this.head, .679, -.164, side * .169);
-      const mandible = mesh(jaw, blade, m.jaws);
-      mandible.scale.z = side;
+      const geometry = side === 1 ? blade : reuseGeometry(`mirrored/${blade.id}`, () => {
+        const other = blade.clone().scale(1, 1, -1);
+        const indices = other.index.array;
+        for (let i = 0; i < indices.length; i += 3) [indices[i + 1], indices[i + 2]] = [indices[i + 2], indices[i + 1]];
+        other.index.needsUpdate = true;
+        return other;
+      });
+      mesh(jaw, geometry, m.jaws);
       this.jaws.push(jaw);
-      const eye = mesh(this.head, eyeGeometry(side), m.eye);
+      const eye = mesh(this.head, reuseGeometry(`eye/${side}`, () => eyeGeometry(side)), m.eye);
       eye.castShadow = false;
       this.antennae.push(this.buildAntenna(side, antennalShells));
     }
@@ -300,17 +335,17 @@ export class WorkerRig {
     this.extendedStingSample = new THREE.Vector3();
     this.sting = group(this.gaster);
     this.stingTip = anatomy.sting.surface(-.179, Math.PI);
-    mesh(this.sting, sculpt(anatomy.sting, 12, 24), m.sting);
+    mesh(this.sting, shellGeometry('sting', 12, 24, compact), m.sting);
     this.sting.visible = false;
 
     this.markerGroup = group(this.root);
     this.markerGroup.visible = false;
     this.contacts = group(this.root);
     this.contacts.visible = false;
-    const footRing = new THREE.RingGeometry(.049, .061, 20);
-    const sockets = ['coxa', 'trochanter', 'femur', 'tibia', 'tarsomere'].map(name => sculpt(anatomy[name], 12, 12));
-    const hairs = [hairGeometry(sockets[2], 13, .32, 95, true), hairGeometry(sockets[3], 24, .46, 96, true)];
-    const claws = [-1, 1].map(terminalClaw);
+    const sockets = ['coxa', 'trochanter', 'femur', 'tibia', 'tarsomere'].map(name => shellGeometry(name, 12, 12, compact));
+    const hairs = compact ? [] : sockets.slice(2, 4).map((shape, index) =>
+      reuseGeometry(`leg-hair/${index}`, () => hairGeometry(shape, index ? 24 : 13, index ? .46 : .32, 95 + index, true)));
+    const claws = compact ? [] : [-1, 1].map(side => reuseGeometry(`claw/${side}`, () => terminalClaw(side)));
     this.legs = legs.map(() => {
       const segments = [
         mesh(this.root, sockets[0], m.hinge), mesh(this.root, sockets[1], m.hinge),
@@ -335,9 +370,13 @@ export class WorkerRig {
   }
 
   addShell(parent, name, material, radial, axial, hairCount, length, seed) {
-    const geometry = sculpt(anatomy[name], radial, axial);
+    const geometry = shellGeometry(name, radial, axial, this.compact);
+    if (name === 'mesosoma' || name === 'head' || name === 'gaster') geometry.userData.bodyShadow = true;
     const part = mesh(parent, geometry, material);
-    part.add(new THREE.Mesh(hairGeometry(geometry, hairCount, length, seed), this.material.setae));
+    if (!this.compact) {
+      part.add(new THREE.Mesh(reuseGeometry(`shell-hair/${name}`,
+        () => hairGeometry(geometry, hairCount, length, seed)), this.material.setae));
+    }
     return part;
   }
 
@@ -354,8 +393,9 @@ export class WorkerRig {
       const thickness = index === 0 ? .041 : index === 8 ? .035 : index === 9 ? .043 : .030;
       const part = mesh(pivot, shapes[shape], index >= 8 ? this.material.club : this.material.antenna);
       part.scale.set(length * 1.02, thickness, thickness * .87);
-      if (index === 0 || index >= 8) {
-        part.add(new THREE.Mesh(hairGeometry(shapes[shape], 13, .25, index + 702, true), this.material.setae));
+      if (!this.compact && (index === 0 || index >= 8)) {
+        part.add(new THREE.Mesh(reuseGeometry(`antenna-hair/${index}`,
+          () => hairGeometry(shapes[shape], 13, .25, index + 702, true)), this.material.setae));
       }
       pieces.push(pivot);
       pivot = group(pivot, length, 0, 0);
@@ -371,7 +411,7 @@ export class WorkerRig {
     return marker;
   }
 
-  update(motion, showJoints, showContacts, stingExtension = 0) {
+  update(motion, showJoints, showContacts, stingExtension = 0, acting = null) {
     const restarted = this.motionLegs !== motion.legs;
     const dt = restarted ? 0 : Math.max(0, motion.clock - this.lastMotionTime);
     if (restarted) {
@@ -384,10 +424,11 @@ export class WorkerRig {
     this.body.quaternion.setFromEuler(angle.set(pose.roll, motion.heading, pose.pitch));
     const time = motion.clock;
     const joints = motion.joints;
-    this.head.rotation.set(joints.headRoll, joints.headYaw, joints.headPitch, 'YXZ');
+    this.head.rotation.set(joints.headRoll, joints.headYaw + (acting?.yaw ?? 0),
+      joints.headPitch + (acting?.nod ?? 0), 'YXZ');
     this.waist.rotation.set(0, joints.waistYaw, joints.waistPitch);
     this.postWaist.rotation.set(0, joints.postYaw, joints.postPitch);
-    this.gaster.rotation.set(joints.gasterRoll, joints.gasterYaw, joints.gasterPitch);
+    this.gaster.rotation.set(joints.gasterRoll, joints.gasterYaw, joints.gasterPitch + (acting?.curl ?? 0));
     this.sting.position.set(THREE.MathUtils.lerp(-.788, -.978, stingExtension),
       THREE.MathUtils.lerp(-.169, -.230, stingExtension), 0);
     this.sting.rotation.z = .065 * stingExtension;
@@ -395,9 +436,9 @@ export class WorkerRig {
     this.clearBody(motion.terrain);
     for (const [index, hinge] of this.jaws.entries()) {
       const side = index === 0 ? -1 : 1;
-      hinge.rotation.y = -side * (.03 + .07 * (.5 + .5 * Math.sin(time * 2.2)) ** 5);
+      hinge.rotation.y = -side * (.03 + .07 * (.5 + .5 * Math.sin(time * 2.2)) ** 5 + (acting?.jaw ?? 0));
     }
-    for (const { side, pieces } of this.antennae) {
+    for (const [index, { side, pieces }] of this.antennae.entries()) {
       const sweep = Math.sin(time * 5.8 + (side === -1 ? 0 : 1.6));
       pieces[0].rotation.set(0, -side * (.69 + .22 * sweep), .83 + .11 * Math.sin(time * 3.8 + side));
       pieces[1].rotation.set(0, side * (.07 + .21 * sweep), -1.29 + .12 * Math.sin(time * 5.1 + side));
@@ -405,6 +446,8 @@ export class WorkerRig {
         pieces[index].rotation.z = -.043 + Math.sin(time * 5.9 - index * .32 + side) * .037;
         pieces[index].rotation.y = side * (.016 + Math.sin(time * 3.7 - index * .17) * .023);
       }
+      const target = acting?.probes?.[index]?.aim;
+      if (target) this.aimAntenna(pieces, side, target, time);
     }
 
     this.markerGroup.visible = showJoints;
@@ -415,6 +458,31 @@ export class WorkerRig {
     bodyOutward.set(0, 0, 1).applyQuaternion(this.body.quaternion);
     bodyUp.copy(up).applyQuaternion(this.body.quaternion);
     for (const [index, leg] of motion.legs.entries()) this.poseLeg(this.legs[index], leg, dt);
+  }
+
+  aimAntenna(pieces, side, target, time) {
+    const base = pieces[0];
+    this.head.worldToLocal(feelTarget.set(target.x, target.y, target.z));
+    feelDirection.subVectors(feelTarget, base.position);
+    const length = feelDirection.length();
+    if (length < .001) return;
+    feelDirection.multiplyScalar(1 / length);
+    const scape = antennaLengths[0];
+    const span = THREE.MathUtils.clamp(length, feelerReach - scape + .025, feelerReach + scape - .025);
+    const along = (scape * scape + span * span - feelerReach * feelerReach) / (2 * span);
+    feelPole.set(-.15, .92, side * .55);
+    feelPole.addScaledVector(feelDirection, -feelPole.dot(feelDirection));
+    if (feelPole.lengthSq() < .000001) feelPole.set(0, 0, side).addScaledVector(feelDirection, -side * feelDirection.z);
+    feelPole.normalize();
+    feelElbow.copy(feelDirection).multiplyScalar(along)
+      .addScaledVector(feelPole, Math.sqrt(Math.max(0, scape * scape - along * along)));
+    feelOuter.copy(feelDirection).multiplyScalar(span).sub(feelElbow);
+    base.quaternion.setFromUnitVectors(axis, feelElbow.normalize());
+    reverseFeeler.copy(base.quaternion).invert();
+    pieces[1].quaternion.setFromUnitVectors(axis, feelOuter.applyQuaternion(reverseFeeler).normalize());
+    for (let index = 2; index < pieces.length; index++) {
+      pieces[index].rotation.set(0, .015 * side * Math.sin(time * 10 + index * .31), -.012);
+    }
   }
 
   groundRisk(part, samples, terrain) {
@@ -441,7 +509,10 @@ export class WorkerRig {
     for (let pass = 0; pass < 3; pass++) {
       const rear = this.groundRisk(this.gaster, this.gasterSamples, terrain);
       const front = this.groundRisk(this.head, this.headSamples, terrain);
-      if (rear.height < .002 && front.height < .002) break;
+      if (rear.height < .002 && front.height < .002) {
+        if (this.sting.visible) this.gasterSamples.pop();
+        return;
+      }
       const neckLift = Math.min(Math.max(0, .25 - this.head.rotation.z), front.pitch);
       this.head.rotation.z += neckLift;
       const trunkPitch = Math.min(.25 - trunkLift, Math.max(0, front.height - neckLift * .58) * .86);
@@ -491,10 +562,14 @@ export class WorkerRig {
     rig.foot.position.copy(toeBase);
     rig.foot.quaternion.setFromUnitVectors(axis, footDirection);
     rig.foot.rotateZ(-swing * .34);
-    for (const [index, point] of [hip, femurBase, knee, ankle, toe].entries()) {
-      rig.markers[index].position.copy(point);
+    if (this.markerGroup.visible) {
+      for (const [index, point] of [hip, femurBase, knee, ankle, toe].entries()) {
+        rig.markers[index].position.copy(point);
+      }
     }
-    rig.contact.visible = !leg.swinging;
-    rig.contact.position.set(toe.x, toe.y + .004, toe.z);
+    if (this.contacts.visible) {
+      rig.contact.visible = !leg.swinging;
+      rig.contact.position.set(toe.x, toe.y + .004, toe.z);
+    }
   }
 }

@@ -173,6 +173,7 @@ function controls(arena) {
     text('care-visits', stats.care);
     text('deliveries', stats.delivered);
     text('shared', stats.shared);
+    text('exchanges', stats.exchanges);
     text('best-score', colony.best?.score.toFixed(1) ?? '—');
     text('world-seed', colony.seed);
     $('queen-food').title = `Need signal ${percent(signals.food)}`;
@@ -189,8 +190,10 @@ function controls(arena) {
       text('worker-reserves', `${percent(selected.food)} · ${percent(selected.water)}`);
       text('weight-count', selected.weights.length);
       text('worker-reward', selected.reward.toFixed(1));
+      const touched = selected.lastTouch?.kind;
+      text('last-touch', touched ? touched[0].toUpperCase() + touched.slice(1) : '—');
     } else {
-      for (const id of ['generation', 'worker-reserves', 'weight-count', 'worker-reward']) text(id, '—');
+      for (const id of ['generation', 'worker-reserves', 'weight-count', 'worker-reward', 'last-touch']) text(id, '—');
     }
     if (colony.best && lastBest !== colony.best) {
       lastBest = colony.best;

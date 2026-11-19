@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ColonyMap } from '../src/colony-map.js';
 import { Colony, defaultSettings } from '../src/colony.js';
+import { QueenActing } from '../src/queen-acting.js';
 
 const advance = (colony, seconds) => {
   for (let tick = 0; tick < seconds * 10; tick++) colony.step();
@@ -93,4 +94,43 @@ test('queen loss triggers a fresh seeded run using the saved champion', () => {
   assert.equal(colony.failed, null);
   assert.equal(colony.workers.length, 1);
   assert.deepEqual(Array.from(colony.workers[0].weights), best);
+});
+
+test('in-range antennae exchange resource locations and urgent signals', () => {
+  const colony = new Colony({ resourceDensity: 0 });
+  const worker = colony.workers[0];
+  Object.assign(worker, { x: 6, z: 10, heading: 0 });
+  const peer = colony.spawnWorker(worker.weights, 1, 8.3, 10.22);
+  peer.heading = Math.PI;
+  peer.water = .16;
+  const water = colony.map.chunk(0, 0).resources.find(patch => patch.kind === 'water');
+  peer.known.add(water);
+  colony.touch.rebuild();
+  for (let i = 0; i < 5; i++) {
+    colony.time += .1;
+    colony.touch.sample(worker, .1);
+  }
+  assert.ok(worker.probes.some(probe => probe.kind === 'worker' && probe.aim));
+  assert.equal(worker.lastTouch.id, peer.id);
+  assert.equal(worker.peerSignals.get(peer).water, .84);
+  assert.ok(worker.known.has(water));
+  assert.equal(colony.stats.exchanges, 1);
+});
+
+test('the queen records and animates both deliveries and egg laying', () => {
+  const colony = new Colony({ restart: false });
+  const observed = new Set();
+  const actor = new QueenActing();
+  let hasCurl = false, drinking = false, eating = false;
+  for (let i = 0; i < 1800; i++) {
+    colony.step();
+    for (const event of colony.queen.events) observed.add(event.kind);
+    const pose = actor.step(colony.queen.events, .1, colony.time);
+    if (!pose) continue;
+    hasCurl ||= pose.event.kind === 'egg' && pose.curl > .17 && pose.visible && pose.deposit < 1;
+    drinking ||= pose.event.kind === 'water' && pose.transfer > 0 && pose.nod < -.14;
+    eating ||= pose.event.kind === 'food' && pose.jaw > .11;
+  }
+  assert.deepEqual(observed, new Set(['egg', 'water', 'food']));
+  assert.ok(hasCurl && drinking && eating);
 });

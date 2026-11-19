@@ -1,6 +1,7 @@
 import { seeded } from './brain.js';
 import { ColonyMap } from './colony-map.js';
 import { inheritPolicy, policyWeightCount, selectAction, taskNames, updatePolicy } from './colony-policy.js';
+import { makeProbes, TouchField } from './touch.js';
 
 export const defaultSettings = Object.freeze({
   eggSeconds: 10, stageSeconds: 60, ageLimit: 0, needRate: 1, resourceDensity: 1,
@@ -15,7 +16,10 @@ const actionResource = {
   eat: 'food', drink: 'water', queenFood: 'food', queenWater: 'water',
   broodFood: 'food', peerFood: 'food', peerWater: 'water',
 };
+export const queenHeading = -.13;
+export const nursery = { x: -2.90, z: 1.87 };
 const nest = { x: 0, z: 0 };
+const queenMouth = { x: 2.20, z: .29 };
 const queenDose = .58;
 const learningRate = .032;
 
@@ -42,14 +46,15 @@ export class Colony {
     this.time = 0;
     this.random = seeded((this.seed ^ Math.imul(this.run, 8419)) || 1);
     this.map = new ColonyMap(this.seed, this.settings);
-    this.queen = { ...nest, food: .94, water: .94, living: true };
+    this.queen = { ...nest, food: .94, water: .94, living: true, events: [] };
+    this.touch = new TouchField(this);
     this.eggClock = 0;
     this.nextId = 1;
     this.brood = [];
     this.workers = [];
     this.messages = [];
     this.signals = { food: .06, water: .06, brood: 0 };
-    this.stats = { eggs: 0, hatched: 0, deaths: 0, care: 0, delivered: 0, shared: 0, updates: 0 };
+    this.stats = { eggs: 0, hatched: 0, deaths: 0, care: 0, delivered: 0, shared: 0, updates: 0, exchanges: 0 };
     this.failed = null;
     this.failureTime = 0;
     this.championCheck = 0;
@@ -63,6 +68,7 @@ export class Colony {
       hold: null, cargo: null, task: null, state: 'Assessing nest', known: new Set(),
       recall: { food: 0, water: 0, brood: 0 }, requests: { food: 0, water: 0, until: 0 },
       scanAt: 0, reward: 0, looking: 0, turn: 0,
+      probes: makeProbes(), peerSignals: new Map(), broodSignals: new Map(), lastTouch: null, slowUntil: 0,
     };
     worker.previous = { x, z, heading: worker.heading };
     this.workers.push(worker);
@@ -76,11 +82,17 @@ export class Colony {
     while (occupied.has(slot)) slot++;
     const id = this.nextId++;
     this.brood.push({
-      id, slot, ...stackPosition(slot, 0, 0, 1.38), stage: 0, age: 0, care: .94, food: .80, moved: false,
+      id, slot, ...stackPosition(slot, -3.20, -.71, .76), stage: 0, age: 0, care: .94, food: .80, moved: false,
       parentId: parent.id, generation: parent.generation + 1,
       weights: inheritPolicy(parent.weights, this.settings.mutation, this.random),
     });
     this.stats.eggs++;
+    this.queenEvent('egg', { id: this.nextId - 1 });
+  }
+
+  queenEvent(kind, payload) {
+    this.queen.events.push({ kind, time: this.time, ...payload });
+    if (this.queen.events.length > 16) this.queen.events.shift();
   }
 
   updateBrood(dt) {
@@ -142,6 +154,7 @@ export class Colony {
     this.signals.water = 1 - this.queen.water;
     this.signals.brood = this.brood.reduce((urgent, brood) => Math.max(urgent,
       1 - (brood.stage === 1 ? Math.min(brood.food, brood.care) : brood.care)), 0);
+    this.touch.rebuild();
     for (const worker of this.workers) {
       worker.previous.x = worker.x;
       worker.previous.z = worker.z;
@@ -152,6 +165,7 @@ export class Colony {
       worker.fatigue = clamp(worker.fatigue + dt * (worker.speed > .2 ? .018 : -.012));
       worker.dirt = clamp(worker.dirt + dt * (worker.speed > .2 ? .016 : .004));
       if (worker.food && worker.water && (!this.settings.ageLimit || worker.age < this.settings.ageLimit)) {
+        this.touch.sample(worker, dt);
         this.runWorker(worker, dt);
       }
     }
@@ -208,6 +222,37 @@ export class Colony {
     worker.requests.until = this.time + 1.8;
   }
 
+  receiveTouch(worker, target, kind) {
+    worker.lastTouch = { kind, id: target.id, time: this.time };
+    if (kind === 'worker') {
+      const previous = worker.peerSignals.get(target);
+      const newExchange = !previous || this.time - previous.exchangeAt > 2.5;
+      const exchangeAt = newExchange ? this.time : previous.exchangeAt;
+      const remember = (receiver, sender) => {
+        receiver.peerSignals.set(sender, {
+          food: 1 - sender.food, water: 1 - sender.water, until: this.time + 8, exchangeAt,
+        });
+        if (newExchange) for (const patch of sender.known) receiver.known.add(patch);
+      };
+      remember(worker, target);
+      remember(target, worker);
+      if (newExchange) {
+        this.stats.exchanges++;
+        worker.slowUntil = this.time + .27;
+        if (target.slowUntil < this.time) target.slowUntil = this.time + .18;
+      }
+    } else if (kind === 'queen') {
+      Object.assign(worker.recall, this.signals);
+    } else if (kind === 'brood') {
+      worker.broodSignals.set(target, { demand: 1 - Math.min(target.care, target.stage === 1 ? target.food : 1),
+        until: this.time + 10 });
+    } else if (kind === 'food' || kind === 'water') {
+      worker.known.add(target);
+    } else if (kind === 'stone' || kind === 'plant') {
+      worker.slowUntil = Math.max(worker.slowUntil, this.time + .15);
+    }
+  }
+
   candidates(worker) {
     const resources = {};
     for (const patch of worker.known) {
@@ -230,17 +275,22 @@ export class Colony {
     for (const [action, kind] of [['queenFood', 'food'], ['queenWater', 'water']]) {
       if (worker.cargo && worker.cargo !== kind) continue;
       const demand = worker.recall[kind];
-      if (demand > .12 || worker.cargo) add(action, demand, worker.cargo ? nest : resources[kind], 0, Number(!!worker.cargo));
+      if (demand > .12 || worker.cargo) add(action, demand, worker.cargo ? queenMouth : resources[kind], 0, Number(!!worker.cargo));
     }
     for (const [action, kind] of [['peerFood', 'food'], ['peerWater', 'water']]) {
       if (worker[kind] < .32 || (worker.cargo && worker.cargo !== kind)) continue;
       let recipient;
+      let bestNeed = 0;
       for (const peer of this.workers) {
-        if (peer !== worker && peer.requests.until >= this.time && gap(worker, peer) < 7.5 &&
-            peer.requests[kind] > (recipient?.requests[kind] ?? 0)) recipient = peer;
+        if (peer === worker || gap(worker, peer) >= 7.5) continue;
+        const contact = worker.peerSignals.get(peer);
+        const viaContact = contact?.until >= this.time && contact[kind] > .61 ? contact[kind] + .08 : 0;
+        const cue = peer.requests.until >= this.time ? peer.requests[kind] : 0;
+        const need = Math.max(cue, viaContact);
+        if (need > bestNeed) { recipient = peer; bestNeed = need; }
       }
       if (recipient) {
-        add(action, recipient.requests[kind], worker.cargo ? recipient : resources[kind], .4, Number(!!worker.cargo));
+        add(action, bestNeed, worker.cargo ? recipient : resources[kind], .4, Number(!!worker.cargo));
         if (worker.cargo || resources[kind]) result.at(-1).recipient = recipient;
       }
     }
@@ -252,7 +302,9 @@ export class Colony {
       const untidy = this.brood.filter(b => !b.carriedBy).sort((a, b) => (a.care + .14 * a.moved) - (b.care + .14 * b.moved));
       if (!worker.cargo && untidy.length) {
         const target = untidy[0];
-        add('tend', 1 - target.care + (target.moved ? 0 : .19), target, untidy.length / 8);
+        const contact = worker.broodSignals.get(target);
+        const seen = contact?.until > this.time ? contact.demand * .22 : 0;
+        add('tend', 1 - target.care + (target.moved ? 0 : .19) + seen, target, untidy.length / 8);
       }
     }
     if (!worker.cargo) {
@@ -268,6 +320,12 @@ export class Colony {
     if (this.time >= worker.scanAt) {
       worker.scanAt = this.time + .72;
       this.sense(worker);
+      for (const [peer, signal] of worker.peerSignals) {
+        if (signal.until < this.time) worker.peerSignals.delete(peer);
+      }
+      for (const [brood, signal] of worker.broodSignals) {
+        if (signal.until < this.time) worker.broodSignals.delete(brood);
+      }
     }
     if (!worker.task) {
       const choice = selectAction(worker.weights, this.candidates(worker), this.random, this.settings.learning ? .15 : .04);
@@ -301,7 +359,7 @@ export class Colony {
       return;
     }
 
-    const stop = target === worker ? 0 : target === nest ? 2.04 : target.kind === 'water' ? 1.24 : target.kind ? .93 : .92;
+    const stop = target === worker ? 0 : target === queenMouth ? 1.33 : target.kind === 'water' ? 1.24 : target.kind ? .93 : .92;
     const distance = gap(worker, target);
     const stationary = distance <= stop + .12;
     if (distance > stop + .47) task.ready = 0;
@@ -322,7 +380,7 @@ export class Colony {
     const urgency = task.features[1];
     const cruise = (1.34 + .83 * urgency) * (1 - .19 * worker.fatigue) * (worker.cargo ? .85 : 1);
     const alignment = Math.max(0, Math.cos(error)) ** 2;
-    const pace = cruise * alignment * clamp((distance - stop) * 1.8, .20, 1);
+    const pace = cruise * alignment * clamp((distance - stop) * 1.8, .20, 1) * (worker.slowUntil > this.time ? .52 : 1);
     worker.speed += (pace - worker.speed) * (1 - Math.exp(-6.2 * dt));
     worker.x += Math.cos(worker.heading) * worker.speed * dt;
     worker.z -= Math.sin(worker.heading) * worker.speed * dt;
@@ -363,7 +421,7 @@ export class Colony {
         target.slot = slot;
         target.carriedBy = worker;
         task.pickedUp = target;
-        task.target = { ...stackPosition(slot, -2.75, .15, .12), slot };
+        task.target = { ...stackPosition(slot, nursery.x, nursery.z, .12), slot };
         task.benefit = Math.min(2.5, benefit);
         task.ready = 0;
         this.stats.care++;
@@ -395,7 +453,7 @@ export class Colony {
       worker.cargo = kind;
       task.phase = 'return';
       task.ready = 0;
-      task.target = task.recipient ?? (action === 'broodFood' ? this.hungryBrood() ?? nest : nest);
+      task.target = task.recipient ?? (action === 'broodFood' ? this.hungryBrood() ?? queenMouth : queenMouth);
       return;
     }
 
@@ -423,6 +481,10 @@ export class Colony {
       gain = Math.min(queenDose, 1 - this.queen[kind]);
       this.queen[kind] += gain;
       this.stats.delivered++;
+      if (gain > 0) {
+        this.queenEvent(kind, { x: worker.x + Math.cos(worker.heading) * 1.17,
+          z: worker.z - Math.sin(worker.heading) * 1.17, y: this.map.height(worker.x, worker.z) + .55 });
+      }
     }
     worker.cargo = null;
     this.finish(worker, Math.min(3.2, gain * 3.8));

@@ -1,4 +1,4 @@
-import { Matrix4, SRGBColorSpace, Vector3 } from 'three';
+import { Frustum, Matrix4, SRGBColorSpace, Vector3 } from 'three';
 import { terrainHeight } from './motion.js';
 
 const center = new Vector3();
@@ -9,6 +9,8 @@ const horizontal = new Vector3();
 const vertical = new Vector3();
 const transform = new Matrix4();
 const scratch = new Matrix4();
+const projected = new Matrix4();
+const visible = new Frustum();
 
 function convexHull(points) {
   const sorted = points.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
@@ -91,7 +93,8 @@ export class SoftwareView {
   silhouette(mesh) {
     const geometry = mesh.geometry;
     const position = geometry.getAttribute('position');
-    const pointAt = index => this.screen(nearEnd.fromBufferAttribute(position, index).applyMatrix4(mesh.matrixWorld).applyMatrix4(transform));
+    projected.multiplyMatrices(transform, mesh.matrixWorld);
+    const pointAt = index => this.screen(nearEnd.fromBufferAttribute(position, index).applyMatrix4(projected));
     if (geometry.userData.oval) {
       return Array.from({ length: 32 }, (_, index) => pointAt(position.count - 33 + index));
     }
@@ -101,17 +104,20 @@ export class SoftwareView {
     const first = pointAt(0), last = pointAt((rows - 1) * stride);
     const axisX = last[0] - first[0], axisY = last[1] - first[1];
     const rings = [];
-    const resolution = rows > 35 ? 23 : 9;
+    const slim = geometry.userData.slimProfile;
+    const resolution = slim ? Math.min(rows, 3) : Math.min(rows, rows > 24 ? 14 : 7);
+    const around = slim ? 4 : 8;
     for (let section = 0; section < resolution; section++) {
       const row = Math.round(section / (resolution - 1) * (rows - 1));
       const ring = [];
-      for (let side = 0; side < 12; side++) {
-        ring.push(pointAt(row * stride + Math.floor(side / 12 * radial)));
+      for (let side = 0; side < around; side++) {
+        ring.push(pointAt(row * stride + Math.floor(side / around * radial)));
       }
       rings.push(ring);
     }
     const middle = rings[Math.floor(rings.length / 2)];
-    if (Math.hypot(axisX, axisY) < Math.hypot(middle[0][0] - middle[6][0], middle[0][1] - middle[6][1]) * 1.05) {
+    const opposite = middle[around / 2];
+    if (Math.hypot(axisX, axisY) < Math.hypot(middle[0][0] - opposite[0], middle[0][1] - opposite[1]) * 1.05) {
       return convexHull(rings.flat());
     }
     const edges = rings.map(ring => {
@@ -147,7 +153,7 @@ export class SoftwareView {
     scene.traverseVisible(mesh => {
       if (!mesh.isMesh || !mesh.material.color) return;
       if (mesh.isInstancedMesh && mesh.geometry.type === 'IcosahedronGeometry') {
-        this.rockShapes(mesh, camera, shapes);
+        if (visible.intersectsObject(mesh)) this.rockShapes(mesh, camera, shapes);
         return;
       }
       const geometry = mesh.geometry;
@@ -169,7 +175,7 @@ export class SoftwareView {
         if (silhouette.length > 2) {
           const profile = geometry.userData.profile;
           shapes.push({ silhouette, screen, color, depth, eye: !profile,
-            seams: profile?.seamRows.length ? this.seams(mesh) : [] });
+            slim: geometry.userData.slimProfile, seams: profile?.seamRows.length ? this.seams(mesh) : [] });
         }
       } else if (geometry.type === 'CylinderGeometry') {
         const first = this.screen(this.position(nearEnd, 0, -.5, 0, mesh.matrixWorld).applyMatrix4(transform));
@@ -179,7 +185,8 @@ export class SoftwareView {
         if (radius > .23) shapes.push({ first, last, radius, screen, depth, color });
       } else if (geometry.type === 'RingGeometry') {
         const r = geometry.parameters.outerRadius * scale;
-        shapes.push({ screen, width: r, height: r * .65, angle: 0, depth: depth - .00004, ring: true, color });
+        shapes.push({ screen, width: r, height: r * .65, angle: 0, depth: depth - .00004, ring: true,
+          color, opacity: mesh.material.opacity });
       } else if (geometry.type === 'SphereGeometry') {
         if (!geometry.boundingBox) geometry.computeBoundingBox();
         const bounds = geometry.boundingBox.max;
@@ -217,7 +224,7 @@ export class SoftwareView {
     ctx.fillStyle = motion.terrain === 'gravel' ? '#625448' : '#5f4634';
     ctx.fillRect(0, 0, w, h);
     if (this.patternImage.complete && this.patternImage.naturalWidth) {
-      const pattern = ctx.createPattern(this.patternImage, 'repeat');
+      const pattern = this.pattern ??= ctx.createPattern(this.patternImage, 'repeat');
       const size = Math.max(.38, Math.min(1.1, 3.8 / camera.position.distanceTo(world.set(motion.x, .4, motion.z))));
       pattern.setTransform(new DOMMatrix().translate(w * .45 - (motion.x * 71) % 900, h * .45 - (motion.z * 61) % 900).rotate(12).scale(size, size * .82));
       ctx.globalAlpha = motion.terrain === 'gravel' ? .74 : .83;
@@ -234,11 +241,6 @@ export class SoftwareView {
       ctx.fillStyle = slope;
       ctx.fillRect(0, 0, w, h);
     }
-    const shade = ctx.createRadialGradient(w * .52, h * .47, w * .05, w * .52, h * .47, Math.max(w, h) * .66);
-    shade.addColorStop(0, '#d4a16d1a');
-    shade.addColorStop(1, '#19140fba');
-    ctx.fillStyle = shade;
-    ctx.fillRect(0, 0, w, h);
   }
 
   drawShape(shape) {
@@ -257,9 +259,15 @@ export class SoftwareView {
         bottom = Math.max(bottom, point[1]);
       }
       ctx.closePath();
-      ctx.clip();
       const width = Math.max(1, right - left);
       const height = Math.max(1, bottom - top);
+      if (shape.slim && Math.min(width, height) < 3.2) {
+        ctx.fillStyle = tint(shape.color, .11);
+        ctx.fill();
+        ctx.restore();
+        return;
+      }
+      ctx.clip();
       ctx.save();
       ctx.translate(left, top);
       ctx.scale(width, height);
@@ -313,7 +321,8 @@ export class SoftwareView {
     ctx.beginPath();
     ctx.ellipse(0, 0, 1, 1, 0, 0, Math.PI * 2);
     if (shape.ring) {
-      ctx.lineWidth = .17;
+      ctx.globalAlpha = shape.opacity;
+      ctx.lineWidth = .10;
       ctx.strokeStyle = tint(shape.color, .06);
       ctx.stroke();
       ctx.restore();
@@ -335,6 +344,7 @@ export class SoftwareView {
     scene.updateMatrixWorld(true);
     camera.updateMatrixWorld();
     transform.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    visible.setFromProjectionMatrix(transform);
     ctx.setTransform(this.ratio, 0, 0, this.ratio, 0, 0);
     this.background(camera, motion);
     const shapes = this.sceneShapes(scene, camera);

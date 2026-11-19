@@ -3,6 +3,9 @@ import { seeded } from './brain.js';
 import { chunkAt, chunkKey, chunkSize } from './colony-map.js';
 import { AntMotion } from './motion.js';
 import { WorkerRig } from './worker.js';
+import { nursery, queenHeading } from './colony.js';
+import { QueenActing } from './queen-acting.js';
+import { WorkerBatches } from './worker-batches.js';
 
 const sphere = new THREE.SphereGeometry(1, 12, 8);
 const grit = new THREE.IcosahedronGeometry(1, 1);
@@ -19,8 +22,6 @@ const materials = {
   egg: new THREE.MeshStandardMaterial({ color: '#ede6c8', roughness: .55 }),
   larva: new THREE.MeshStandardMaterial({ color: '#e0c69a', roughness: .73 }),
   pupa: new THREE.MeshStandardMaterial({ color: '#c69a70', roughness: .76 }),
-  skin: new THREE.MeshStandardMaterial({ color: '#b75127', roughness: .53 }),
-  rear: new THREE.MeshStandardMaterial({ color: '#542b25', roughness: .44 }),
   signal: new THREE.MeshBasicMaterial({ color: '#a4d7b5', transparent: true, opacity: .65, depthWrite: false, side: THREE.DoubleSide }),
 };
 
@@ -34,7 +35,7 @@ function ellipsoid(parent, material, x, y, z, sx, sy, sz) {
 
 function tileSurface(world, chunk, material) {
   const size = chunkSize;
-  const surface = new THREE.PlaneGeometry(size, size, 48, 48).rotateX(-Math.PI / 2);
+  const surface = new THREE.PlaneGeometry(size, size, 24, 24).rotateX(-Math.PI / 2);
   const data = surface.attributes.position;
   const uv = surface.attributes.uv;
   const offsetX = chunk.x * size, offsetZ = chunk.z * size;
@@ -96,32 +97,16 @@ function makeNursery(parent) {
   for (let i = 0; i < 25; i++) {
     const angle = i * 2.399963;
     const radius = 1 + Math.sqrt(i) * .066;
-    ellipsoid(parent, materials.nurse, -2.75 + Math.cos(angle) * radius, .008,
-      .15 + Math.sin(angle) * radius, .18, .055, .15);
+    ellipsoid(parent, materials.nurse, nursery.x + Math.cos(angle) * radius, .008,
+      nursery.z + Math.sin(angle) * radius, .18, .055, .15);
   }
 }
 
-function makeRemoteWorker(parent) {
-  const group = new THREE.Group();
-  const legs = [];
-  ellipsoid(group, materials.skin, .55, .47, 0, .35, .29, .28);
-  ellipsoid(group, materials.skin, .03, .43, 0, .40, .24, .23);
-  ellipsoid(group, materials.rear, -.67, .40, 0, .46, .32, .33);
-  for (const side of [-1, 1]) {
-    for (let i = 0; i < 3; i++) {
-      const x = .32 - i * .31;
-      const angle = side * (.64 + i * .51);
-      const knee = ellipsoid(group, materials.skin, x + .22 * Math.cos(angle), .29, side * .32, .35, .048, .054);
-      knee.rotation.y = -side * angle;
-      const foot = ellipsoid(group, materials.skin, x, .16, side * .60, .31, .04, .043);
-      foot.rotation.x = side * .44;
-      foot.rotation.y = side * 1.05;
-      legs.push(foot);
-    }
-  }
-  parent.add(group);
-  return { group, legs };
-}
+const inView = new THREE.Frustum();
+const cameraTransform = new THREE.Matrix4();
+const workerBounds = new THREE.Sphere(new THREE.Vector3(), 2.8);
+const contactFrom = new THREE.Vector3();
+const contactTo = new THREE.Vector3();
 
 export class ColonyScene {
   constructor(scene, renderer, software, lowPower) {
@@ -132,7 +117,9 @@ export class ColonyScene {
     this.entities = new THREE.Group();
     this.detail = new THREE.Group();
     this.nest = new THREE.Group();
-    this.scene.add(this.entities, this.detail, this.nest);
+    this.scene.add(this.entities, this.nest);
+    if (software) this.scene.add(this.detail);
+    this.batches = software ? null : new WorkerBatches(scene);
     const texture = new THREE.TextureLoader().load('./textures/loam.webp');
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
@@ -149,7 +136,10 @@ export class ColonyScene {
     this.needs = new THREE.Mesh(ring, materials.signal);
     this.nest.add(this.needs);
     this.detailed = [];
-    this.remote = [];
+    this.queenActing = new QueenActing();
+    this.queenTransfer = ellipsoid(this.entities, materials.water, 0, 0, 0, .10, .10, .10);
+    this.queenTransfer.visible = false;
+    this.eggOrigin = new THREE.Vector3();
     this.brood = [];
   }
 
@@ -158,7 +148,9 @@ export class ColonyScene {
     for (const [key, tile] of this.tiles) this.removeTile(key, tile);
     for (const entry of this.detailed) entry.id = null;
     this.queenMotion.terrain = world.height;
-    this.queenMotion.reset(0, 0, -.13);
+    this.tileWindow = '';
+    this.queenActing.reset();
+    this.queenMotion.reset(0, 0, queenHeading);
     this.queen.update(this.queenMotion, false, false);
     this.updateTiles(orbitTarget);
   }
@@ -166,41 +158,55 @@ export class ColonyScene {
   removeTile(key, tile) {
     this.scene.remove(tile.group);
     tile.ground.geometry.dispose();
-    tile.scatter.dispose();
+    tile.scatter?.dispose();
     this.tiles.delete(key);
   }
 
-  updateTiles(target) {
+  updateTiles(target, distance = 17) {
     const x = chunkAt(target.x), z = chunkAt(target.z);
-    const span = this.lowPower ? 1 : 2;
+    const detail = this.lowPower ? 1 : 2;
+    const span = this.software ? 1 : distance > 37 ? 3 : 2;
+    const window = `${x}/${z}/${span}/${detail}`;
+    if (window === this.tileWindow) return;
+    this.tileWindow = window;
     for (const [key, tile] of this.tiles) {
       if (Math.abs(x - tile.x) > span || Math.abs(z - tile.z) > span) this.removeTile(key, tile);
     }
     for (let tx = x - span; tx <= x + span; tx++) {
       for (let tz = z - span; tz <= z + span; tz++) {
         const key = chunkKey(tx, tz);
-        if (this.tiles.has(key)) continue;
-        this.addTile(key, this.world.chunk(tx, tz));
+        const decorate = Math.abs(tx - x) <= detail && Math.abs(tz - z) <= detail;
+        const existing = this.tiles.get(key);
+        if (!existing) this.addTile(key, this.world.chunk(tx, tz), decorate);
+        else if (existing.props) existing.props.visible = decorate;
+        else if (decorate) this.decorateTile(existing, this.world.chunk(tx, tz));
       }
     }
   }
 
-  addTile(key, chunk) {
+  addTile(key, chunk, decorate) {
     const group = new THREE.Group();
     const ground = tileSurface(this.world, chunk, this.ground);
     group.add(ground);
+    this.scene.add(group);
+    const tile = { group, ground, patches: [], x: chunk.x, z: chunk.z };
+    this.tiles.set(key, tile);
+    if (decorate) this.decorateTile(tile, chunk);
+  }
+
+  decorateTile(tile, chunk) {
+    const group = new THREE.Group();
+    tile.group.add(group);
+    tile.props = group;
     const patches = chunk.resources.map(patch => makePatch(patch, this.world));
     for (const { group: visual } of patches) group.add(visual);
     const random = seeded(chunk.seed);
-    const scatter = new THREE.InstancedMesh(grit, materials.rock, 85);
+    const scatter = new THREE.InstancedMesh(grit, materials.rock, chunk.stones.length);
     const transform = new THREE.Object3D();
     const shade = new THREE.Color();
-    for (let i = 0; i < scatter.count; i++) {
-      const x = chunk.x * chunkSize + (random() - .5) * chunkSize;
-      const z = chunk.z * chunkSize + (random() - .5) * chunkSize;
-      const radius = .035 + random() ** 5 * (.32 + .34 * Number(Math.hypot(x, z) > 18));
-      transform.position.set(x, this.world.height(x, z) + radius * .13, z);
-      transform.scale.set(radius * (1 + random()), radius * .47, radius * (1 + random() * .45));
+    for (const [i, { x, y, z, radius }] of chunk.stones.entries()) {
+      transform.position.set(x, y, z);
+      transform.scale.set(radius * (1 + random() * .33), radius * .47, radius * (1 + random() * .27));
       transform.rotation.set(random() * .4, random() * 6, random() * .3);
       transform.updateMatrix();
       scatter.setMatrixAt(i, transform.matrix);
@@ -209,13 +215,7 @@ export class ColonyScene {
     }
     scatter.computeBoundingSphere();
     group.add(scatter);
-    const stems = this.lowPower ? 4 : 8;
-    for (let i = 0; i < stems; i++) {
-      const x = chunk.x * chunkSize + (random() - .5) * chunkSize;
-      const z = chunk.z * chunkSize + (random() - .5) * chunkSize;
-      if (Math.hypot(x, z) < 7 || chunk.resources.some(patch => Math.hypot(x - patch.x, z - patch.z) < 1.6)) continue;
-      const y = this.world.height(x, z);
-      const height = .34 + random() ** 2 * 1.65;
+    for (const { x, y, z, height } of chunk.plants) {
       for (let blade = 0; blade < 3; blade++) {
         const leaf = ellipsoid(group, materials.sprout, x + (blade - 1) * .11, y + height * .41,
           z + (blade === 1 ? .11 : 0), .077, height * (.41 + random() * .18), .025);
@@ -223,12 +223,15 @@ export class ColonyScene {
         leaf.rotation.x = random() * .48;
       }
     }
-    this.scene.add(group);
-    this.tiles.set(key, { group, ground, patches, x: chunk.x, z: chunk.z, scatter });
+    tile.patches = patches;
+    tile.scatter = scatter;
   }
 
-  update(colony, target, selected, dt, flags, alpha) {
-    this.updateTiles(target);
+  update(colony, target, selected, dt, flags, alpha, camera, visualDt) {
+    this.updateTiles(target, camera.position.distanceTo(target));
+    camera.updateMatrixWorld();
+    cameraTransform.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    inView.setFromProjectionMatrix(cameraTransform);
     for (const tile of this.tiles.values()) {
       for (const visual of tile.patches) {
         const { patch, group } = visual;
@@ -243,11 +246,33 @@ export class ColonyScene {
     this.needs.position.y = .037;
     this.needs.scale.setScalar(2.16 + urgency * .8 + .22 * Math.sin(colony.time * 3));
     materials.signal.opacity = .24 + urgency * .56;
-    this.updateBrood(colony.brood);
-    this.updateWorkers(colony.workers, target, selected, dt, flags, alpha);
+    const performance = this.queenActing.step(colony.queen.events, visualDt, colony.time);
+    this.updateQueen(performance, visualDt);
+    this.updateBrood(colony.brood, performance);
+    this.updateWorkers(colony.workers, selected, dt, flags, alpha);
   }
 
-  updateBrood(brood) {
+  updateQueen(performance, dt) {
+    this.queenMotion.clock += dt;
+    this.queenTransfer.visible = false;
+    if (!this.queenPivot.visible) return;
+    if (!dt && !performance) return;
+    this.queen.update(this.queenMotion, false, false, 0, performance);
+    if (!performance) return;
+    if (performance.event.kind === 'egg') {
+      this.queen.gaster.localToWorld(this.eggOrigin.set(-.97, -.145, 0));
+    } else if (performance.visible) {
+      const event = performance.event;
+      this.queen.head.localToWorld(contactTo.set(.87, -.21, 0));
+      this.queenTransfer.position.copy(contactFrom.set(event.x, event.y, event.z)).lerp(contactTo, performance.transfer);
+      const size = .104 * (1 - performance.transfer * .62);
+      this.queenTransfer.scale.set(size, size * 1.13, size);
+      this.queenTransfer.material = event.kind === 'water' ? materials.water : materials.crumb;
+      this.queenTransfer.visible = true;
+    }
+  }
+
+  updateBrood(brood, performance) {
     const stages = [materials.egg, materials.larva, materials.pupa];
     for (let i = 0; i < brood.length; i++) {
       const specimen = brood[i];
@@ -258,29 +283,37 @@ export class ColonyScene {
       const size = 1 + .57 * specimen.stage;
       part.position.set(specimen.x, this.world.height(specimen.x, specimen.z) +
         (specimen.carriedBy ? .52 : .075 + specimen.layer * .129), specimen.z);
+      if (!specimen.carriedBy && specimen.id === performance?.event.id && performance.event.kind === 'egg') {
+        part.visible = performance.visible;
+        part.position.lerp(this.eggOrigin, 1 - performance.deposit);
+        part.position.y += Math.sin(performance.deposit * Math.PI) * .12;
+      }
       part.scale.set(.17 * size, .072 * size, .083 * size);
       part.rotation.y = specimen.id * 2.4;
     }
     for (let i = brood.length; i < this.brood.length; i++) this.brood[i].visible = false;
   }
 
-  updateWorkers(workers, target, selected, dt, flags, alpha) {
-    const limit = this.software ? 2 : this.lowPower ? 3 : 5;
-    const visible = workers.filter(worker => Math.hypot(worker.x - target.x, worker.z - target.z) < 39);
-    visible.sort((a, b) => (a !== selected) - (b !== selected) ||
-      (a.x - target.x) ** 2 + (a.z - target.z) ** 2 - (b.x - target.x) ** 2 - (b.z - target.z) ** 2);
-    const chosen = new Set(visible.slice(0, limit).map(worker => worker.id));
+  updateWorkers(workers, selected, dt, flags, alpha) {
+    const visible = workers.filter(worker => {
+      workerBounds.center.set(worker.x, .60, worker.z);
+      return inView.intersectsSphere(workerBounds);
+    });
+    const visibleIds = new Set(visible.map(worker => worker.id));
+    const available = [];
     for (const entry of this.detailed) {
-      if (chosen.has(entry.id)) continue;
+      if (visibleIds.has(entry.id)) continue;
       entry.id = null;
       entry.rig.root.visible = false;
+      available.push(entry);
     }
-    for (const worker of visible.slice(0, limit)) {
-      let entry = this.detailed.find(candidate => candidate.id === worker.id)
-        ?? this.detailed.find(candidate => candidate.id === null);
+    const active = new Map(this.detailed.filter(entry => entry.id !== null).map(entry => [entry.id, entry]));
+    this.batches?.reset();
+    for (const worker of visible) {
+      let entry = active.get(worker.id) ?? available.pop();
       if (!entry) {
         const motion = new AntMotion(this.world.height);
-        const rig = new WorkerRig(this.detail, motion.legs);
+        const rig = new WorkerRig(this.detail, motion.legs, true);
         const cargo = ellipsoid(rig.head, materials.crumb, .84, -.19, .012, .102, .057, .078);
         entry = { id: null, motion, rig, cargo };
         this.detailed.push(entry);
@@ -302,21 +335,11 @@ export class ColonyScene {
         });
       }
       rig.update(motion, flags.joints && selected === worker, flags.contacts && selected === worker,
-        flags.sting && selected === worker ? 1 : 0);
+        flags.sting && selected === worker ? 1 : 0, { probes: worker.probes });
       cargo.visible = !!worker.cargo;
       cargo.material = worker.cargo === 'water' ? materials.water : materials.crumb;
+      this.batches?.add(rig.root);
     }
-    const distant = visible.slice(limit, limit + 75);
-    for (const [index, agent] of distant.entries()) {
-      const entry = this.remote[index] ?? (this.remote[index] = makeRemoteWorker(this.entities));
-      entry.group.visible = true;
-      entry.group.position.set(agent.x, this.world.height(agent.x, agent.z), agent.z);
-      entry.group.rotation.y = agent.heading;
-      for (const [i, foot] of entry.legs.entries()) {
-        const phase = Math.sin(agent.age * (12 + agent.speed * 2) + i * Math.PI);
-        foot.position.y = .16 + phase * Math.min(.12, agent.speed * .058);
-      }
-    }
-    for (let i = distant.length; i < this.remote.length; i++) this.remote[i].group.visible = false;
+    this.batches?.commit();
   }
 }

@@ -4,6 +4,7 @@ import { Scene, Vector3 } from 'three';
 import { AntMotion, terrainHeight } from '../src/motion.js';
 import { anatomy, sculpt } from '../src/sculpt.js';
 import { WorkerRig } from '../src/worker.js';
+import { WorkerBatches } from '../src/worker-batches.js';
 
 test('authored shell profiles produce finite geometry with mixed station curvature', () => {
   for (const [part, definition] of Object.entries(anatomy)) {
@@ -49,4 +50,38 @@ test('the curved abdomen and extended sting clear the terrain', () => {
   }
   assert.equal(rig.sting.visible, true);
   assert.ok(rig.sting.position.x < -.95);
+});
+
+test('a crowded batch keeps each worker’s articulated shells, legs, and antennae', () => {
+  const display = new Scene();
+  const poses = new Scene();
+  const batch = new WorkerBatches(display);
+  let reference;
+  for (let i = 0; i < 12; i++) {
+    const motion = new AntMotion();
+    motion.reset(i * .3, 0);
+    const rig = new WorkerRig(poses, motion.legs, true);
+    rig.update(motion, false, false);
+    assert.equal(rig.legs.length, 6);
+    assert.deepEqual(rig.antennae.map(antenna => antenna.pieces.length), [10, 10]);
+    const gaster = rig.gaster.children[0].geometry;
+    assert.ok(gaster.userData.profile.seamRows.length >= 3);
+    if (reference) assert.equal(gaster, reference);
+    reference = gaster;
+    batch.add(rig.root);
+  }
+  batch.commit();
+  const gasters = display.children.find(mesh => mesh.geometry === reference);
+  assert.equal(gasters.count, 12);
+  assert.ok(display.children.length < 35);
+});
+
+test('the visible antenna tip reaches a close tactile target', () => {
+  const motion = new AntMotion();
+  motion.reset(0, 0, 0);
+  const rig = new WorkerRig(new Scene(), motion.legs, true);
+  const target = new Vector3(1.95, .53, -.43);
+  rig.update(motion, false, false, 0, { probes: [{ aim: target }] });
+  const tipJoint = rig.antennae[0].pieces.at(-1);
+  assert.ok(tipJoint.localToWorld(new Vector3(.137, 0, 0)).distanceTo(target) < .07);
 });

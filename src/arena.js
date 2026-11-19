@@ -28,8 +28,7 @@ export class ColonyArena {
     this.dirty = true;
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color('#3f3326');
-    this.scene.fog = new THREE.FogExp2('#403529', .034);
-    this.camera = new THREE.PerspectiveCamera(43, 1, .06, 134);
+    this.camera = new THREE.PerspectiveCamera(43, 1, .06, 240);
     const surface = document.createElement('canvas');
     const context = surface.getContext('webgl2', { alpha: false, antialias: true });
     this.software = !context;
@@ -48,7 +47,7 @@ export class ColonyArena {
     this.orbit.dampingFactor = .14;
     this.orbit.maxPolarAngle = Math.PI * .464;
     this.orbit.minDistance = 2.8;
-    this.orbit.maxDistance = 48;
+    this.orbit.maxDistance = 68;
     this.orbit.rotateSpeed = .68;
     this.orbit.panSpeed = .88;
     this.orbit.addEventListener('change', () => { this.dirty = true; });
@@ -127,8 +126,8 @@ export class ColonyArena {
     input.odor[0] = Math.min(1, Math.max(0, .25 + turn * .27 + signal.food * .4));
     input.odor[1] = Math.min(1, Math.max(0, .25 - turn * .27 + signal.water * .4));
     input.vision = Math.min(1, .08 + speed * .30);
-    input.touch = Number(agent.state === 'Eating' || agent.state === 'Drinking' || agent.state === 'Tending brood');
-    input.contact[0] = input.contact[1] = input.touch * .7;
+    for (const [i, probe] of agent.probes.entries()) input.contact[i] = probe.kind ? .82 : 0;
+    input.touch = Math.max(...input.contact);
     input.turn = turn / 2;
     input.pace = Math.min(1, speed / 2);
     this.brain.step(input);
@@ -225,7 +224,8 @@ export class ColonyArena {
     const elapsed = this.lastFrame ? (stamp - this.lastFrame) / 1000 : 0;
     this.lastFrame = stamp;
     this.objects.update(this.colony, this.orbit.target, this.selected,
-      this.flags.paused ? 0 : elapsed * this.flags.rate, this.flags, Math.max(0, this.accumulated / colonyStep));
+      this.flags.paused ? 0 : elapsed * this.flags.rate, this.flags, Math.max(0, this.accumulated / colonyStep),
+      this.camera, this.flags.paused ? 0 : Math.min(.12, elapsed));
     if (!this.software && (!this.lastShadow || stamp - this.lastShadow > (this.lowPower ? 95 : 65))) {
       const target = this.orbit.target;
       this.sun.target.position.set(target.x, 0, target.z);

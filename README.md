@@ -16,6 +16,10 @@ Fire Ant Lab is a mobile-first 3D colony simulation inspired by the red imported
 
 Eggs accumulate around the queen. Workers can pick up brood and carry it to the nursery. The care meter applies to all three stages. Larvae also require food. The queen depends on workers for food and water. Adults can die when either reserve runs out. If the queen dies or the last worker is lost, the run fails. With auto-restart enabled, a new world starts four simulated seconds later.
 
+Food and water deliveries trigger different mouthpart motions in the queen. The queen flexes her abdomen to place each egg at the rear of the nest. Antennae sweep independently and reach for nearby contacts. Workers exchange needs and known resource locations when they touch. Touch also samples the queen, brood, food, water, and terrain features using approximate collision shapes. **Worker & brain** shows the inspected worker’s most recent contact.
+
+All visible workers use the same articulated anatomy. WebGL draws their shared parts in batches and updates the world tiles when the camera moves between chunks. The compatibility renderer projects the same worker rigs onto a canvas.
+
 ## Training
 
 Each worker owns a small, trainable action-value policy. Its 66 weights score eleven available tasks using cues for deficit, distance, cargo, and nearby demand. The founder starts with hand-set weights that make basic survival possible. Small exploratory variations sometimes favor a different task. Temporal-difference updates use the rewards from successful deliveries, self-care, scouting, and brood care, with a cost for time spent. This setup learns task priorities while the action repertoire, terrain navigation, and leg mechanics are authored. The default checkpoint score includes survival time, hatchings, deliveries, losses, and the queen's reserves.

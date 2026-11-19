@@ -49,7 +49,23 @@ export class ColonyMap {
       if (Math.hypot(px, pz) < 5.2) continue;
       resources.push(patch(random() > .33 ? 'food' : 'water', px, pz, 9 + Math.floor(random() * 20)));
     }
-    const tile = { seed, resources, x, z };
+    const stoneRandom = seeded((seed ^ 0x37ad71) || 1);
+    const stones = Array.from({ length: 85 }, (_, index) => {
+      const px = x * chunkSize + (stoneRandom() - .5) * chunkSize;
+      const pz = z * chunkSize + (stoneRandom() - .5) * chunkSize;
+      const radius = .035 + stoneRandom() ** 5 * (.32 + .34 * Number(Math.hypot(px, pz) > 18));
+      return { index, x: px, z: pz, radius, y: this.height(px, pz) + radius * .13 };
+    });
+    const plantRandom = seeded((seed ^ 0x482371) || 1);
+    const plants = [];
+    for (let i = 0; i < 7; i++) {
+      const px = x * chunkSize + (plantRandom() - .5) * chunkSize;
+      const pz = z * chunkSize + (plantRandom() - .5) * chunkSize;
+      const height = .34 + plantRandom() ** 2 * 1.65;
+      if (Math.hypot(px, pz) < 7 || resources.some(patch => Math.hypot(px - patch.x, pz - patch.z) < 1.6)) continue;
+      plants.push({ x: px, z: pz, height, y: this.height(px, pz) });
+    }
+    const tile = { seed, resources, stones, plants, x, z };
     this.chunks.set(id, tile);
     return tile;
   }
@@ -70,5 +86,21 @@ export class ColonyMap {
     if (time <= patch.lastRefill) return;
     patch.units = Math.min(patch.capacity, patch.units + (time - patch.lastRefill) * this.settings.resourceRenewal);
     patch.lastRefill = time;
+  }
+
+  forEachObstacle(x, z, radius, visit) {
+    for (let tz = chunkAt(z - radius); tz <= chunkAt(z + radius); tz++) {
+      for (let tx = chunkAt(x - radius); tx <= chunkAt(x + radius); tx++) {
+        const tile = this.chunk(tx, tz);
+        for (const stone of tile.stones) {
+          if (stone.radius > .135 && (x - stone.x) ** 2 + (z - stone.z) ** 2 < radius * radius) visit(stone,
+            stone.y + stone.radius * .15, stone.radius * .73, 'stone');
+        }
+        for (const plant of tile.plants) {
+          if ((x - plant.x) ** 2 + (z - plant.z) ** 2 < radius * radius) visit(plant,
+            plant.y + Math.min(.68, plant.height * .42), .19, 'plant');
+        }
+      }
+    }
   }
 }
