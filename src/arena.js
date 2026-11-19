@@ -74,6 +74,28 @@ function makeTerrain(scene, renderer) {
   return { floor, set };
 }
 
+function contactShadows(scene) {
+  const size = 48;
+  const pixels = new Uint8Array(size * size * 4);
+  for (let i = 0; i < size * size; i++) {
+    const radius = Math.hypot((i % size + .5) * 2 / size - 1, (Math.floor(i / size) + .5) * 2 / size - 1);
+    pixels.set([255, 255, 255, Math.round(255 * Math.max(0, 1 - radius) ** 1.62)], i * 4);
+  }
+  const map = new THREE.DataTexture(pixels, size, size);
+  map.magFilter = THREE.LinearFilter;
+  map.needsUpdate = true;
+  const geometry = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+  const material = new THREE.MeshBasicMaterial({ color: '#1e110b', map, transparent: true, opacity: .66, depthWrite: false });
+  return [
+    [-1.36, 1.7, .98], [-.2, 1.42, .74], [.91, 1.36, .84],
+  ].map(([offset, width, length]) => {
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.scale.set(width, 1, length);
+    scene.add(mesh);
+    return { mesh, offset };
+  });
+}
+
 export class Arena {
   constructor(host, onStats) {
     this.host = host;
@@ -136,6 +158,7 @@ export class Arena {
 
     this.terrain = makeTerrain(this.scene, this.renderer);
     this.terrain.set(this.motion.terrain);
+    this.shadows = this.software ? [] : contactShadows(this.scene);
     this.rig = new WorkerRig(this.scene, this.motion.legs);
     this.rig.update(this.motion, false, false);
     this.raycaster = new THREE.Raycaster();
@@ -309,6 +332,14 @@ export class Arena {
       this.dirty = true;
     }
     this.rig.update(this.motion, this.flags.joints, this.flags.contacts);
+    const cosine = Math.cos(this.motion.heading);
+    const sine = Math.sin(this.motion.heading);
+    for (const { mesh, offset } of this.shadows) {
+      const x = this.motion.x + cosine * offset;
+      const z = this.motion.z - sine * offset;
+      mesh.position.set(x, terrainHeight(this.motion.terrain, x, z) + .04, z);
+      mesh.rotation.y = this.motion.heading;
+    }
     this.focusPoint.set(this.motion.x + .12, this.motion.bodyPose().height * .82, this.motion.z);
     this.shift.subVectors(this.focusPoint, this.orbit.target).multiplyScalar(1 - Math.exp(-8 * dt));
     if (this.shift.lengthSq() > .00000001) {

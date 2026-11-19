@@ -51,8 +51,15 @@ try {
   await mobile.screenshot({ path: 'browser-results/phone.png', fullPage: true });
   await mobile.waitForFunction(() => navigator.serviceWorker.controller !== null);
   await phone.setOffline(true);
-  await mobile.reload();
-  await mobile.locator('canvas').waitFor();
+  const failedOfflineRequests = [];
+  mobile.on('requestfailed', request => failedOfflineRequests.push([request.url(), request.failure()?.errorText]));
+  try {
+    await mobile.reload();
+    await mobile.locator('canvas').waitFor();
+  } catch (error) {
+    console.error('Offline state:', await mobile.locator('body').innerText(), failedOfflineRequests, errors);
+    throw error;
+  }
   assert.equal(await mobile.getByRole('heading', { name: 'Fire ant simulator' }).isVisible(), true);
   await phone.close();
 

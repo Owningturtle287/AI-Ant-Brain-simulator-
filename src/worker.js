@@ -27,7 +27,7 @@ function cuticle() {
       const fine = Math.sin(63 * u + 111 * v) * Math.cos(49 * v - 51 * u);
       const pore = random();
       const color = 225 + 13 * mottle + 9 * fine - (pore > .98 ? 22 : pore * 9);
-      colors.set([color, color, color, 255], offset);
+      colors.set([color + mottle * 5, color - mottle * 7, color - mottle * 8, 255], offset);
       const relief = 126 + 35 * fine + 12 * mottle - (pore > .97 ? 35 : 0);
       bumps.set([relief, relief, relief, 255], offset);
     }
@@ -237,8 +237,8 @@ export class WorkerRig {
     this.root = group(scene);
     this.body = group(this.root);
     this.segment(.28, .039, 0, [.405, .246, .251], m.thorax, .6, 105, 32);
-    this.segment(-.12, .035, 0, [.340, .216, .218], m.thorax, .1, 62, 30);
-    this.segment(-.42, .022, 0, [.256, .183, .183], m.waist, .38, 38, 14);
+    this.segment(-.12, .025, 0, [.340, .185, .210], m.thorax, .1, 62, 30);
+    this.segment(-.42, .008, 0, [.256, .158, .176], m.waist, .38, 38, 14);
     this.segment(.62, .032, 0, [.22, .133, .158], m.hinge, .2, 34, 35);
 
     this.head = group(this.body, .83, .105, 0);

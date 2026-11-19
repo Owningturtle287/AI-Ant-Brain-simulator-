@@ -14,13 +14,19 @@ for (const path of files) {
   hash.update(await readFile(new URL(path, directory)));
 }
 const version = hash.digest('hex').slice(0, 12);
-await writeFile(new URL('sw.js', directory), `const prefix = 'fire-ant-lab:' + self.registration.scope + ':';
+await writeFile(new URL('sw.js', directory), `const scope = self.registration.scope;
+const prefix = 'fire-ant-lab:' + scope + ':';
 const cacheName = prefix + '${version}';
 const assets = ${JSON.stringify(['./', ...files.map(path => './' + path)])};
-const urls = new Set(assets.map(path => new URL(path, self.registration.scope).href));
+const urls = new Set(assets.map(path => new URL(path, scope).href));
+const home = new URL('index.html', scope).href;
 
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(cacheName).then(cache => cache.addAll(assets)));
+  event.waitUntil((async () => {
+    const cache = await caches.open(cacheName);
+    await cache.addAll(assets);
+    await self.skipWaiting();
+  })());
 });
 self.addEventListener('activate', event => {
   event.waitUntil((async () => {
@@ -31,14 +37,17 @@ self.addEventListener('activate', event => {
 });
 self.addEventListener('fetch', event => {
   const request = event.request;
-  if (request.method !== 'GET' || !request.url.startsWith(self.registration.scope)) return;
-  if (request.mode === 'navigate') {
-    event.respondWith(fetch(request).catch(async () => {
-      const cache = await caches.open(cacheName);
-      return cache.match('./');
-    }));
+  if (request.method !== 'GET' || !request.url.startsWith(scope)) return;
+  const url = new URL(request.url);
+  if (request.mode === 'navigate' && (url.pathname === new URL(scope).pathname || url.pathname === new URL(home).pathname)) {
+    event.respondWith(cacheOrFetch(home, request));
   } else if (urls.has(request.url)) {
-    event.respondWith(caches.open(cacheName).then(async cache => (await cache.match(request)) || fetch(request)));
+    event.respondWith(cacheOrFetch(request.url, request));
   }
 });
+
+async function cacheOrFetch(url, request) {
+  const cache = await caches.open(cacheName);
+  return (await cache.match(url, { ignoreVary: true })) || fetch(request);
+}
 `);
