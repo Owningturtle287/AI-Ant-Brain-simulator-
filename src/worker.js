@@ -205,8 +205,12 @@ const aim = new THREE.Vector3();
 const hip = new THREE.Vector3(), coxa = new THREE.Vector3(), femurBase = new THREE.Vector3();
 const toe = new THREE.Vector3(), toeBase = new THREE.Vector3(), footDirection = new THREE.Vector3();
 const ankle = new THREE.Vector3(), knee = new THREE.Vector3();
-const forward = new THREE.Vector3(), outward = new THREE.Vector3(), kneeHint = new THREE.Vector3();
+const forward = new THREE.Vector3();
+const bodyForward = new THREE.Vector3(), bodyOutward = new THREE.Vector3(), bodyUp = new THREE.Vector3();
 const along = new THREE.Vector3(), pieceStart = new THREE.Vector3(), pieceEnd = new THREE.Vector3();
+const upperPole = new THREE.Vector3(), sidePole = new THREE.Vector3(), desiredPole = new THREE.Vector3();
+const poleCross = new THREE.Vector3();
+const transport = new THREE.Quaternion();
 const angle = new THREE.Euler(0, 0, 0, 'YXZ');
 
 function poseLink(part, start, end, thickness, width = 1, twist = 0) {
@@ -217,16 +221,41 @@ function poseLink(part, start, end, thickness, width = 1, twist = 0) {
   part.rotateX(twist);
 }
 
-function solveKnee(base, target, joint, direction, first, second) {
+function solveKnee(base, target, joint, rig, leg, swing, dt) {
+  const { type, side } = leg;
   along.subVectors(target, base);
   const targetDistance = along.length();
-  const distance = THREE.MathUtils.clamp(targetDistance, Math.abs(first - second) + .001, first + second - .001);
-  along.normalize();
-  if (targetDistance > distance) target.copy(base).addScaledVector(along, distance);
-  direction.addScaledVector(along, -direction.dot(along)).normalize();
-  const projection = (first * first - second * second + distance * distance) / (2 * distance);
+  if (targetDistance > .0001) along.multiplyScalar(1 / targetDistance);
+  else along.copy(footDirection);
+  const distance = THREE.MathUtils.clamp(targetDistance, Math.abs(type.upper - type.lower) + .001, type.upper + type.lower - .001);
+  if (targetDistance !== distance) target.copy(base).addScaledVector(along, distance);
+
+  sidePole.crossVectors(up, along);
+  const horizontal = sidePole.length();
+  if (horizontal > .0001) {
+    sidePole.multiplyScalar(-1 / horizontal);
+    upperPole.copy(up).addScaledVector(along, -along.y).normalize();
+    desiredPole.copy(upperPole).multiplyScalar(type.kneeRise + swing * .12)
+      .addScaledVector(sidePole, side * type.kneeSpread).normalize();
+  } else {
+    desiredPole.copy(footDirection).addScaledVector(along, -footDirection.dot(along)).normalize();
+  }
+
+  if (rig.poleReady) {
+    // Carry the previous bend around with the leg before steering it toward the new plane.
+    transport.setFromUnitVectors(rig.lastAxis, along);
+    rig.pole.applyQuaternion(transport);
+    const turn = Math.atan2(along.dot(poleCross.crossVectors(rig.pole, desiredPole)), rig.pole.dot(desiredPole));
+    const limit = dt * 8.5 * THREE.MathUtils.smoothstep(horizontal, .025, .25);
+    rig.pole.applyAxisAngle(along, THREE.MathUtils.clamp(turn, -limit, limit)).normalize();
+  } else {
+    rig.pole.copy(desiredPole);
+    rig.poleReady = true;
+  }
+  rig.lastAxis.copy(along);
+  const projection = (type.upper ** 2 - type.lower ** 2 + distance ** 2) / (2 * distance);
   joint.copy(base).addScaledVector(along, projection);
-  joint.addScaledVector(direction, Math.sqrt(Math.max(0, first * first - projection * projection)));
+  joint.addScaledVector(rig.pole, Math.sqrt(Math.max(0, type.upper ** 2 - projection ** 2)));
 }
 
 export class WorkerRig {
@@ -237,7 +266,7 @@ export class WorkerRig {
     this.body = group(this.root);
     this.addShell(this.body, 'mesosoma', m.mesosoma, 26, 52, 152, .039, 45);
 
-    this.head = group(this.body, .614, .062);
+    this.head = group(this.body, .585, .124);
     this.addShell(this.head, 'head', m.head, 34, 54, 203, .039, 63);
     this.jaws = [];
     this.antennae = [];
@@ -253,9 +282,9 @@ export class WorkerRig {
       this.antennae.push(this.buildAntenna(side, antennalShells));
     }
 
-    this.waist = group(this.body, -.615, .012);
+    this.waist = group(this.body, -.598, -.067);
     this.addShell(this.waist, 'petiole', m.waist, 22, 28, 32, .033, 75);
-    this.postWaist = group(this.waist, -.222, -.013);
+    this.postWaist = group(this.waist, -.226, -.006);
     this.addShell(this.postWaist, 'postpetiole', m.waist, 22, 28, 34, .031, 76);
     this.gaster = group(this.postWaist, -.198, -.002);
     this.addShell(this.gaster, 'gaster', m.gaster, 32, 60, 169, .039, 84);
@@ -281,7 +310,7 @@ export class WorkerRig {
       const contact = new THREE.Mesh(footRing, m.feetMarker);
       contact.rotation.x = -Math.PI / 2;
       this.contacts.add(contact);
-      return { segments, foot, markers, contact };
+      return { segments, foot, markers, contact, pole: new THREE.Vector3(), lastAxis: new THREE.Vector3(), poleReady: false };
     });
     this.anatomyMarkers = [
       this.marker(this.head, .035), this.marker(this.waist, .032),
@@ -329,16 +358,22 @@ export class WorkerRig {
   }
 
   update(motion, showJoints, showContacts) {
+    const restarted = this.motionLegs !== motion.legs;
+    const dt = restarted ? 0 : Math.max(0, motion.clock - this.lastMotionTime);
+    if (restarted) {
+      for (const leg of this.legs) leg.poleReady = false;
+      this.motionLegs = motion.legs;
+    }
+    this.lastMotionTime = motion.clock;
     const pose = motion.bodyPose();
     this.body.position.set(motion.x, pose.height, motion.z);
     this.body.quaternion.setFromEuler(angle.set(pose.roll, motion.heading, pose.pitch));
     const time = motion.clock;
-    const activity = Math.min(1, motion.speed / 2.45);
-    this.head.rotation.set(Math.sin(time * 3.6) * .016, Math.sin(time * 2.95) * .062, -.17 + Math.sin(time * 3.8) * .034);
-    this.waist.rotation.y = Math.sin(motion.stride * 2 * Math.PI) * .044 * activity;
-    this.waist.rotation.z = Math.sin(time * 3.5) * .034 + .047;
-    this.postWaist.rotation.y = -.56 * this.waist.rotation.y;
-    this.gaster.rotation.z = Math.sin(time * 3.5 - .65) * .026 + .038;
+    const joints = motion.joints;
+    this.head.rotation.set(-pose.roll * .24, joints.headYaw, joints.headPitch);
+    this.waist.rotation.set(0, joints.waistYaw, joints.waistPitch);
+    this.postWaist.rotation.set(0, joints.gasterYaw * .36, joints.gasterPitch * .32);
+    this.gaster.rotation.set(joints.gasterRoll, joints.gasterYaw * .64, joints.gasterPitch * .68);
     for (const [index, hinge] of this.jaws.entries()) {
       const side = index === 0 ? -1 : 1;
       hinge.rotation.y = -side * (.03 + .07 * (.5 + .5 * Math.sin(time * 2.2)) ** 5);
@@ -357,27 +392,30 @@ export class WorkerRig {
     this.contacts.visible = showContacts;
     for (const marker of this.anatomyMarkers) marker.visible = showJoints;
     forward.set(Math.cos(motion.heading), 0, -Math.sin(motion.heading));
-    outward.set(Math.sin(motion.heading), 0, Math.cos(motion.heading));
-    for (const [index, leg] of motion.legs.entries()) this.poseLeg(this.legs[index], leg);
+    bodyForward.copy(axis).applyQuaternion(this.body.quaternion);
+    bodyOutward.set(0, 0, 1).applyQuaternion(this.body.quaternion);
+    bodyUp.copy(up).applyQuaternion(this.body.quaternion);
+    for (const [index, leg] of motion.legs.entries()) this.poseLeg(this.legs[index], leg, dt);
   }
 
-  poseLeg(rig, leg) {
+  poseLeg(rig, leg, dt) {
     const { type, side } = leg;
-    hip.set(type.x, -.091, side * type.socket).applyQuaternion(this.body.quaternion).add(this.body.position);
-    coxa.copy(hip).addScaledVector(outward, side * .066).addScaledVector(forward, type.x * -.095);
-    coxa.y -= .138;
-    femurBase.copy(coxa).addScaledVector(outward, side * .052).addScaledVector(forward, type.x * .10);
-    femurBase.y -= .021;
+    hip.set(type.x, type.y, side * type.socket).applyQuaternion(this.body.quaternion).add(this.body.position);
     toe.set(leg.x, leg.y, leg.z);
-    footDirection.subVectors(toe, femurBase);
-    footDirection.y = 0;
-    footDirection.normalize();
+    const swing = Math.sin(Math.PI * leg.swingProgress);
+    const foreAft = THREE.MathUtils.clamp((toe.x - hip.x) * forward.x + (toe.z - hip.z) * forward.z, -.85, .85);
+    coxa.copy(hip).addScaledVector(bodyOutward, side * .062)
+      .addScaledVector(bodyForward, type.coxaSweep + foreAft * .080)
+      .addScaledVector(bodyUp, -type.coxaDrop + swing * .025);
+    femurBase.copy(coxa).addScaledVector(bodyOutward, side * .052)
+      .addScaledVector(bodyForward, foreAft * .027)
+      .addScaledVector(bodyUp, -.018);
+    footDirection.set(Math.cos(leg.footAngle), 0, Math.sin(leg.footAngle));
     toeBase.copy(toe).addScaledVector(footDirection, -.035);
     toeBase.y += .010;
-    ankle.copy(toeBase).addScaledVector(footDirection, -type.foot * .69);
-    ankle.y += type.foot * .52;
-    kneeHint.set(0, .56, 0).addScaledVector(outward, .96 * side).addScaledVector(forward, type.x * 1.02);
-    solveKnee(femurBase, ankle, knee, kneeHint, type.upper, type.lower);
+    ankle.copy(toeBase).addScaledVector(footDirection, -type.foot * (.70 - swing * .14));
+    ankle.y += type.foot * (.47 + swing * .16);
+    solveKnee(femurBase, ankle, knee, rig, leg, swing, dt);
 
     const { segments } = rig;
     poseLink(segments[0], hip, coxa, .069, .98, .2 * side);
@@ -393,6 +431,7 @@ export class WorkerRig {
     }
     rig.foot.position.copy(toeBase);
     rig.foot.quaternion.setFromUnitVectors(axis, footDirection);
+    rig.foot.rotateZ(-swing * .34);
     for (const [index, point] of [hip, femurBase, knee, ankle, toe].entries()) {
       rig.markers[index].position.copy(point);
     }
