@@ -19,6 +19,7 @@ const icons = {
   terrain: '<path d="m3 17 6-9 4 6 3-4 5 7H3Zm5-8 1-2m7-2h.01"/>',
   joints: '<circle cx="6" cy="17" r="2"/><circle cx="12" cy="7" r="2"/><circle cx="19" cy="14" r="2"/><path d="m7 15 4-6m3-1 4 4"/>',
   steps: '<path d="M7 12c-2 0-3 2-3 4s1 3 2 3c2 0 3-2 3-4s-1-3-2-3Zm9-7c-2 0-3 2-3 4s1 3 2 3c2 0 3-2 3-4s-1-3-2-3Z"/>',
+  sting: '<path d="M5 5c0 7 4 11 13 13l3 3c-1.2-3.8-3.2-6.3-7-8.2C10.4 11 7.3 8.7 5 5Z"/>',
   check: '<path d="m5 12 5 5 9-10"/>',
 };
 
@@ -106,7 +107,7 @@ function controls(arena) {
   }
   $('zoom-in').addEventListener('click', () => arena.zoom(.78));
   $('zoom-out').addEventListener('click', () => arena.zoom(1.28));
-  for (const flag of ['joints', 'contacts']) {
+  for (const flag of ['joints', 'contacts', 'sting']) {
     $(flag).addEventListener('change', event => {
       arena.flags[flag] = event.target.checked;
       arena.dirty = true;

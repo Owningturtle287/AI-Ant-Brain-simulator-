@@ -102,7 +102,8 @@ export class Arena {
     this.host = host;
     this.onStats = onStats;
     this.motion = new AntMotion();
-    this.flags = { paused: false, joints: false, contacts: false, rate: 1, quality: 'auto', guide: false };
+    this.flags = { paused: false, joints: false, contacts: false, sting: false, rate: 1, quality: 'auto', guide: false };
+    this.stingExtension = 0;
     this.lastStamp = 0;
     this.accumulator = 0;
     this.lastUIUpdate = -Infinity;
@@ -339,7 +340,15 @@ export class Arena {
       }
       this.dirty = true;
     }
-    this.rig.update(this.motion, this.flags.joints, this.flags.contacts);
+    const stingTarget = this.flags.sting ? 1 : 0;
+    const extension = THREE.MathUtils.damp(this.stingExtension, stingTarget, 15, dt);
+    const stingExtension = Math.abs(stingTarget - extension) < .002 ? stingTarget : extension;
+    if (stingExtension !== this.stingExtension) {
+      this.stingExtension = stingExtension;
+      this.renderer.shadowMap.needsUpdate = true;
+      this.dirty = true;
+    }
+    this.rig.update(this.motion, this.flags.joints, this.flags.contacts, this.stingExtension);
     const cosine = Math.cos(this.motion.heading);
     const sine = Math.sin(this.motion.heading);
     for (const { mesh, offset } of this.shadows) {

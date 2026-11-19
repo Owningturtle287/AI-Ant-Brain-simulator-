@@ -85,7 +85,25 @@ test('head leads and abdomen trails a sharp change in direction', () => {
   motion.manual = [-1, -1];
   for (let i = 0; i < 30; i++) motion.step(step);
   assert.ok(motion.yawRate > 0);
-  assert.ok(motion.joints.headYaw > .12);
-  assert.ok(motion.joints.waistYaw + motion.joints.gasterYaw < -.12);
+  assert.ok(motion.joints.headYaw > .47 && motion.joints.headYaw <= .66);
+  const abdomenYaw = motion.joints.waistYaw + motion.joints.postYaw + motion.joints.gasterYaw;
+  assert.ok(abdomenYaw < -.48);
   assert.ok(motion.legs.filter(leg => !leg.swinging).length >= 3);
+});
+
+test('the body stands higher and lifts slightly as it walks', () => {
+  const motion = new AntMotion();
+  const floor = terrainHeight(motion.terrain, motion.x, motion.z);
+  const restingHeight = motion.bodyPose().height - floor;
+  assert.ok(restingHeight > .66);
+  motion.manual = [1, 0];
+  let height = 0, samples = 0;
+  for (let frame = 0; frame < 170; frame++) {
+    motion.step(step);
+    if (motion.speed < 1.8) continue;
+    height += motion.bodyPose().height - terrainHeight(motion.terrain, motion.x, motion.z);
+    samples++;
+  }
+  assert.ok(samples > 75);
+  assert.ok(height / samples > restingHeight + .012);
 });

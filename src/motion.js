@@ -48,8 +48,21 @@ const routes = {
   tunnel: [[4.65, .18], [5.55, .65], [4.65, -.45], [1.3, -.23], [-4.8, -.18], [-5.55, .42], [-4.65, .5]],
 };
 
-const neutralPose = () => ({ height: .528, pitch: 0, roll: 0 });
-const neutralJoints = () => ({ headYaw: 0, headPitch: -.24, waistYaw: 0, waistPitch: .036, gasterYaw: 0, gasterPitch: .016, gasterRoll: 0 });
+const standingHeight = .675;
+const neutralPose = () => ({ height: standingHeight, pitch: 0, roll: 0 });
+const neutralJoints = () => ({
+  headYaw: 0, headPitch: -.24, headRoll: 0,
+  waistYaw: 0, waistPitch: .024,
+  postYaw: 0, postPitch: .017,
+  gasterYaw: 0, gasterPitch: .122, gasterRoll: 0,
+});
+// These are animation limits inferred from comparative anatomy and the model's clearances.
+const jointTravel = {
+  headYaw: [-.66, .66, 21], headPitch: [-.58, .25, 18], headRoll: [-.23, .23, 18],
+  waistYaw: [-.31, .31, 13], waistPitch: [-.24, .24, 13],
+  postYaw: [-.23, .23, 10], postPitch: [-.18, .19, 11],
+  gasterYaw: [-.26, .26, 8], gasterPitch: [-.35, .36, 10], gasterRoll: [-.16, .16, 10],
+};
 const footClearance = .022;
 const stanceTime = .64;
 const maximumYawRate = 2.58;
@@ -67,6 +80,7 @@ export class AntMotion {
     this.z = 0;
     this.heading = .12;
     this.yawRate = 0;
+    this.turnIntent = 0;
     this.stride = 0;
     this.clock = 0;
     this.speed = 0;
@@ -146,6 +160,7 @@ export class AntMotion {
     const targetHeading = this.manual ? Math.atan2(-this.manual[1], this.manual[0]) : Math.atan2(this.z - targetZ, targetX - this.x);
     const stopping = this.destination && this.arrived && !this.manual;
     const error = stopping ? 0 : angleDelta(this.heading, targetHeading);
+    this.turnIntent = clamp(error / .82, -1, 1);
     const targetYaw = clamp(error * 4.6, -maximumYawRate, maximumYawRate);
     this.yawRate = approach(this.yawRate, targetYaw, 15, dt);
     if (Math.abs(error) < .008 && Math.abs(this.yawRate) < .018) this.yawRate = 0;
@@ -294,20 +309,25 @@ export class AntMotion {
     const activity = clamp(this.speed / 2.45 + Math.abs(this.yawRate) * .19, 0, 1);
     const step = this.stride * twoPi;
     const turn = this.yawRate / maximumYawRate;
-    this.pose.height = approach(this.pose.height, .528 + average * .85 + support * .15 + Math.cos(step * 2) * .014 * activity, 17, dt);
+    const walkingLift = .022 * clamp(this.speed / 2.1, 0, 1);
+    this.pose.height = approach(this.pose.height, standingHeight + walkingLift + average * .85 + support * .15 + Math.cos(step * 2) * .013 * activity, 17, dt);
     this.pose.pitch = approach(this.pose.pitch, Math.atan2(front - rear, 1.02) + Math.sin(step + .5) * .033 * activity, 13, dt);
     this.pose.roll = approach(this.pose.roll, Math.atan2(left - right, .94) + Math.cos(step) * .043 * activity - turn * .10, 14, dt);
+    const scan = Math.sin(this.clock * 2.4) * .069 + Math.sin(this.clock * .84) * .038;
     const target = {
-      headYaw: turn * .225 + Math.sin(step + .44) * .038 * activity,
+      headYaw: turn * .44 + this.turnIntent * .19 + scan * (1 - activity * .74) + Math.sin(step + .44) * .032 * activity,
       headPitch: -.24 - this.pose.pitch * .39 + Math.sin(step * 2 + .65) * .037 * activity,
-      waistYaw: -turn * .14 + Math.sin(step - .8) * .061 * activity,
-      waistPitch: .036 - this.pose.pitch * .22 + Math.sin(step - .45) * .047 * activity,
-      gasterYaw: -turn * .125 + Math.sin(step - 1.2) * .054 * activity,
-      gasterPitch: .016 - this.pose.pitch * .18 + Math.cos(step - .85) * .045 * activity,
-      gasterRoll: -this.pose.roll * .25 + Math.sin(step - 1.12) * .037 * activity,
+      headRoll: -this.pose.roll * .50 + Math.sin(step - .2) * .031 * activity - turn * .038,
+      waistYaw: -turn * .238 + Math.sin(step - .8) * .047 * activity,
+      waistPitch: .024 - this.pose.pitch * .26 + Math.sin(step - .45) * .036 * activity,
+      postYaw: -turn * .158 + Math.sin(step - 1.05) * .033 * activity,
+      postPitch: .017 - this.pose.pitch * .12 + Math.sin(step - .68) * .026 * activity,
+      gasterYaw: -turn * .197 + Math.sin(step - 1.36) * .041 * activity,
+      gasterPitch: .122 - this.pose.pitch * .29 + Math.cos(step - .85) * .040 * activity,
+      gasterRoll: -this.pose.roll * .23 + Math.sin(step - 1.12) * .039 * activity,
     };
-    for (const name of Object.keys(target)) {
-      this.joints[name] = approach(this.joints[name], target[name], name.startsWith('head') ? 19 : 10, dt);
+    for (const [name, [min, max, response]] of Object.entries(jointTravel)) {
+      this.joints[name] = approach(this.joints[name], clamp(target[name], min, max), response, dt);
     }
   }
 

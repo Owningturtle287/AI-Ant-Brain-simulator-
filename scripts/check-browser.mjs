@@ -29,6 +29,7 @@ try {
   const side = desktop.getByRole('button', { name: 'Side', exact: true });
   await side.click();
   assert.equal(await side.getAttribute('aria-pressed'), 'true');
+  await desktop.getByRole('switch', { name: /Extend sting/ }).check();
   await desktop.screenshot({ path: 'browser-results/profile.png' });
   await desktop.getByRole('button', { name: 'Top', exact: true }).click();
   await desktop.getByRole('switch', { name: /Joint markers/ }).check();

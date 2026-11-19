@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { Scene } from 'three';
-import { AntMotion } from '../src/motion.js';
+import { Scene, Vector3 } from 'three';
+import { AntMotion, terrainHeight } from '../src/motion.js';
 import { anatomy, sculpt } from '../src/sculpt.js';
 import { WorkerRig } from '../src/worker.js';
 
@@ -32,4 +32,21 @@ test('leg joints stay continuous when the walking direction reverses', () => {
       previous[index].copy(knee);
     }
   }
+});
+
+test('the curved abdomen and extended sting clear the terrain', () => {
+  const motion = new AntMotion('tunnel');
+  const rig = new WorkerRig(new Scene(), motion.legs);
+  const point = new Vector3();
+  rig.update(motion, false, false);
+  assert.equal(rig.sting.visible, false);
+  motion.steerTo(1.7, -1.8);
+  for (let frame = 0; frame < 720; frame++) {
+    motion.step(1 / 120);
+    rig.update(motion, false, false, 1);
+    const tip = rig.sting.localToWorld(point.copy(rig.stingTip));
+    assert.ok(tip.y > terrainHeight(motion.terrain, tip.x, tip.z) + .018);
+  }
+  assert.equal(rig.sting.visible, true);
+  assert.ok(rig.sting.position.x < -.95);
 });

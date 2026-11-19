@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { terrainHeight } from './motion.js';
 import { anatomy, sculpt } from './sculpt.js';
 
 const up = new THREE.Vector3(0, 1, 0);
@@ -82,6 +83,7 @@ function materials() {
     antenna: shell('#8e482c', .40, .009),
     club: shell('#a3613b', .42, .008),
     jaws: shell('#532618', .31, .019),
+    sting: shell('#9e6b3c', .31, .004),
     claw: new THREE.MeshStandardMaterial({ color: '#775035', roughness: .43 }),
     eye: new THREE.MeshPhysicalMaterial({ color: '#1b1513', roughness: .45, clearcoat: .23, bumpMap: facets(), bumpScale: .0065 }),
     setae: new THREE.MeshStandardMaterial({ color: '#be9365', roughness: .78, side: THREE.DoubleSide }),
@@ -267,7 +269,11 @@ export class WorkerRig {
     this.addShell(this.body, 'mesosoma', m.mesosoma, 26, 52, 152, .039, 45);
 
     this.head = group(this.body, .585, .124);
+    mesh(this.head, sculpt(anatomy.neck, 14, 18), m.hinge).position.set(-.047, -.043, 0);
     this.addShell(this.head, 'head', m.head, 34, 54, 203, .039, 63);
+    this.headSamples = [.25, .43, .58, .70, .76].flatMap(x =>
+      [Math.PI - .60, Math.PI, Math.PI + .60].map(angle => anatomy.head.surface(x, angle)));
+    this.headSamples.push(new THREE.Vector3(.89, -.287, 0));
     this.jaws = [];
     this.antennae = [];
     const blade = sculpt(anatomy.mandible, 24, 40);
@@ -288,6 +294,14 @@ export class WorkerRig {
     this.addShell(this.postWaist, 'postpetiole', m.waist, 22, 28, 34, .031, 76);
     this.gaster = group(this.postWaist, -.198, -.002);
     this.addShell(this.gaster, 'gaster', m.gaster, 32, 60, 169, .039, 84);
+    this.gasterSamples = [-.30, -.47, -.59, -.73, -.88, -.976].flatMap(x =>
+      [Math.PI - .61, Math.PI, Math.PI + .61].map(angle => anatomy.gaster.surface(x, angle)));
+    this.clearancePoint = new THREE.Vector3();
+    this.extendedStingSample = new THREE.Vector3();
+    this.sting = group(this.gaster);
+    this.stingTip = anatomy.sting.surface(-.179, Math.PI);
+    mesh(this.sting, sculpt(anatomy.sting, 12, 24), m.sting);
+    this.sting.visible = false;
 
     this.markerGroup = group(this.root);
     this.markerGroup.visible = false;
@@ -357,7 +371,7 @@ export class WorkerRig {
     return marker;
   }
 
-  update(motion, showJoints, showContacts) {
+  update(motion, showJoints, showContacts, stingExtension = 0) {
     const restarted = this.motionLegs !== motion.legs;
     const dt = restarted ? 0 : Math.max(0, motion.clock - this.lastMotionTime);
     if (restarted) {
@@ -370,10 +384,15 @@ export class WorkerRig {
     this.body.quaternion.setFromEuler(angle.set(pose.roll, motion.heading, pose.pitch));
     const time = motion.clock;
     const joints = motion.joints;
-    this.head.rotation.set(-pose.roll * .24, joints.headYaw, joints.headPitch);
+    this.head.rotation.set(joints.headRoll, joints.headYaw, joints.headPitch, 'YXZ');
     this.waist.rotation.set(0, joints.waistYaw, joints.waistPitch);
-    this.postWaist.rotation.set(0, joints.gasterYaw * .36, joints.gasterPitch * .32);
-    this.gaster.rotation.set(joints.gasterRoll, joints.gasterYaw * .64, joints.gasterPitch * .68);
+    this.postWaist.rotation.set(0, joints.postYaw, joints.postPitch);
+    this.gaster.rotation.set(joints.gasterRoll, joints.gasterYaw, joints.gasterPitch);
+    this.sting.position.set(THREE.MathUtils.lerp(-.788, -.978, stingExtension),
+      THREE.MathUtils.lerp(-.169, -.230, stingExtension), 0);
+    this.sting.rotation.z = .065 * stingExtension;
+    this.sting.visible = stingExtension > .24;
+    this.clearBody(motion.terrain);
     for (const [index, hinge] of this.jaws.entries()) {
       const side = index === 0 ? -1 : 1;
       hinge.rotation.y = -side * (.03 + .07 * (.5 + .5 * Math.sin(time * 2.2)) ** 5);
@@ -396,6 +415,46 @@ export class WorkerRig {
     bodyOutward.set(0, 0, 1).applyQuaternion(this.body.quaternion);
     bodyUp.copy(up).applyQuaternion(this.body.quaternion);
     for (const [index, leg] of motion.legs.entries()) this.poseLeg(this.legs[index], leg, dt);
+  }
+
+  groundRisk(part, samples, terrain) {
+    part.updateWorldMatrix(true, false);
+    let height = 0, pitch = 0;
+    for (const point of samples) {
+      this.clearancePoint.copy(point).applyMatrix4(part.matrixWorld);
+      const ground = terrainHeight(terrain, this.clearancePoint.x, this.clearancePoint.z);
+      const deficit = ground + .027 - this.clearancePoint.y;
+      height = Math.max(height, deficit);
+      pitch = Math.max(pitch, deficit / Math.max(.23, Math.abs(point.x)));
+    }
+    return { height, pitch };
+  }
+
+  clearBody(terrain) {
+    // Use the neck and the three waist articulations for clearance on banks.
+    if (this.sting.visible) {
+      this.sting.updateMatrix();
+      this.extendedStingSample.copy(this.stingTip).applyMatrix4(this.sting.matrix);
+      this.gasterSamples.push(this.extendedStingSample);
+    }
+    let trunkLift = 0;
+    for (let pass = 0; pass < 3; pass++) {
+      const rear = this.groundRisk(this.gaster, this.gasterSamples, terrain);
+      const front = this.groundRisk(this.head, this.headSamples, terrain);
+      if (rear.height < .002 && front.height < .002) break;
+      const neckLift = Math.min(Math.max(0, .25 - this.head.rotation.z), front.pitch);
+      this.head.rotation.z += neckLift;
+      const trunkPitch = Math.min(.25 - trunkLift, Math.max(0, front.height - neckLift * .58) * .86);
+      this.body.rotateZ(trunkPitch);
+      trunkLift += trunkPitch;
+      this.waist.rotation.z = Math.max(-.24, this.waist.rotation.z - rear.pitch * .20);
+      this.postWaist.rotation.z = Math.max(-.18, this.postWaist.rotation.z - rear.pitch * .17);
+      this.gaster.rotation.z = Math.max(-.35, this.gaster.rotation.z - rear.pitch * .63);
+    }
+    const rear = this.groundRisk(this.gaster, this.gasterSamples, terrain);
+    const front = this.groundRisk(this.head, this.headSamples, terrain);
+    this.body.position.y += Math.min(.13, Math.max(rear.height, front.height));
+    if (this.sting.visible) this.gasterSamples.pop();
   }
 
   poseLeg(rig, leg, dt) {
