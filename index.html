@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#151916">
+  <meta name="description" content="An interactive 3D fire ant anatomy and locomotion simulator.">
+  <link rel="icon" href="./icons/ant-192.png">
+  <link rel="apple-touch-icon" href="./icons/apple-touch.png">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <title>Fire Ant Lab | AI Ant Brain Simulator</title>
+</head>
+<body>
+  <header class="masthead">
+    <div class="brand">
+      <img src="./icons/ant-192.png" width="42" height="42" alt="">
+      <div><span>Fire Ant Lab</span><small>AI Ant Brain Simulator</small></div>
+    </div>
+    <div class="head-actions">
+      <button type="button" id="install" class="text-button" hidden><i data-icon="download"></i> <span>Install app</span></button>
+      <button type="button" id="open-help" class="text-button" aria-label="Open controls guide"><i data-icon="help"></i> <span>Controls</span></button>
+    </div>
+  </header>
+
+  <main>
+    <div class="page-intro">
+      <div>
+        <p class="eyebrow"><span></span> LOCOMOTION LAB</p>
+        <h1>Fire ant simulator</h1>
+        <p class="intro-copy">Observe and guide an articulated red imported fire ant.</p>
+      </div>
+    </div>
+
+    <div class="workbench">
+      <section class="simulation" aria-label="Interactive simulation">
+        <div class="stage" id="stage" aria-label="3D fire ant arena">
+          <div class="stage-overlay">
+            <div class="status-chip" id="sim-status"><span></span><strong>Running</strong></div>
+            <div class="view-tools" aria-label="Camera controls">
+              <button type="button" id="orbit" aria-pressed="true"><i data-icon="cube"></i><span>Orbit</span></button>
+              <button type="button" id="overhead" aria-pressed="false"><i data-icon="top"></i><span>Top</span></button>
+              <button type="button" id="zoom-in" aria-label="Zoom in"><i data-icon="plus"></i></button>
+              <button type="button" id="zoom-out" aria-label="Zoom out"><i data-icon="minus"></i></button>
+            </div>
+          </div>
+          <div id="canvas-host" class="canvas-host"><p id="render-message">Preparing the 3D arena…</p></div>
+          <div class="guide-tools">
+            <p id="arena-hint"><i data-icon="pointer"></i><span>Drag to orbit · Pinch or scroll to zoom</span></p>
+            <button type="button" id="guide" aria-pressed="false"><i data-icon="target"></i><span>Guide ant</span></button>
+          </div>
+        </div>
+        <div class="transport">
+          <div class="transport-primary">
+            <button type="button" class="primary" id="play" aria-label="Pause simulation"><i data-icon="pause"></i><span>Pause</span></button>
+            <button type="button" class="icon-button" id="reset" aria-label="Reset simulation" title="Reset simulation"><i data-icon="reset"></i></button>
+          </div>
+          <div class="speed-control">
+            <label for="speed">Speed</label>
+            <select id="speed" aria-label="Simulation speed">
+              <option value=".25">0.25×</option>
+              <option value=".5">0.5×</option>
+              <option value="1" selected>1×</option>
+              <option value="2">2×</option>
+            </select>
+          </div>
+          <time id="sim-time" aria-label="Elapsed simulation time">00:00</time>
+        </div>
+      </section>
+
+      <aside class="panel" aria-label="Simulation inspector">
+        <div class="tabs" role="tablist" aria-label="Inspector views">
+          <button type="button" id="specimen-tab" role="tab" aria-selected="true" aria-controls="specimen-panel"><i data-icon="ant"></i> Specimen</button>
+          <button type="button" id="terrain-tab" role="tab" aria-selected="false" aria-controls="terrain-panel" tabindex="-1"><i data-icon="terrain"></i> Terrain</button>
+        </div>
+        <section class="panel-content" id="specimen-panel" role="tabpanel" aria-labelledby="specimen-tab">
+          <span class="section-label">SPECIMEN</span>
+          <h2>Red imported fire ant</h2>
+          <p class="latin">Solenopsis invicta</p>
+          <div class="metrics">
+            <div><span>Body length</span><strong>3.5 <small>mm</small></strong></div>
+            <div><span>Feet in contact</span><strong id="foot-count">6 <small>/ 6</small></strong></div>
+          </div>
+          <div class="detail-heading"><h3>Body layers</h3><span>VIEW</span></div>
+          <label class="toggle-row">
+            <i data-icon="joints"></i>
+            <span><strong>Joint markers</strong><small>Show articulation points</small></span>
+            <input type="checkbox" id="joints" role="switch">
+          </label>
+          <label class="toggle-row">
+            <i data-icon="steps"></i>
+            <span><strong>Foot contacts</strong><small>Show planted feet</small></span>
+            <input type="checkbox" id="contacts" role="switch">
+          </label>
+        </section>
+        <section class="panel-content" id="terrain-panel" role="tabpanel" aria-labelledby="terrain-tab" hidden>
+          <span class="section-label">ARENA</span>
+          <h2>Terrain</h2>
+          <p class="terrain-copy">Change the surface under the ant’s feet.</p>
+          <div class="terrain-list" role="group" aria-label="Terrain presets">
+            <button type="button" data-terrain="loam" aria-pressed="true"><span class="terrain-sample loam"></span><span><strong>Forest loam</strong><small>Level ground</small></span><i data-icon="check"></i></button>
+            <button type="button" data-terrain="gravel" aria-pressed="false"><span class="terrain-sample gravel"></span><span><strong>Rocky ground</strong><small>Uneven footing</small></span><i data-icon="check"></i></button>
+            <button type="button" data-terrain="tunnel" aria-pressed="false"><span class="terrain-sample tunnel"></span><span><strong>Open tunnel</strong><small>Sloped banks and a narrow floor</small></span><i data-icon="check"></i></button>
+          </div>
+          <label class="quality" for="quality"><span>Graphics quality</span><select id="quality"><option value="auto">Auto</option><option value="high">High</option><option value="low">Battery saver</option></select></label>
+        </section>
+      </aside>
+    </div>
+
+    <footer><span>Articulated worker model</span><span>Phase 1 <span aria-hidden="true">/</span> Body &amp; locomotion</span></footer>
+  </main>
+
+  <dialog id="help">
+    <div class="dialog-heading"><h2>Controls</h2><button type="button" id="close-help" class="icon-button" aria-label="Close controls"><i data-icon="close"></i></button></div>
+    <dl>
+      <dt>Look around</dt><dd>Drag the arena to orbit. Pinch, scroll, or use + and − to zoom.</dd>
+      <dt>Guide the ant</dt><dd>Turn on Guide ant and tap a patch of ground. You can also steer with the arrow keys while the arena has focus.</dd>
+      <dt>Inspect a step</dt><dd>Pause or slow the simulation, then turn on joint markers or foot contacts in the Specimen tab.</dd>
+    </dl>
+    <p id="install-help">On iPhone, open this page in Safari and use Share → Add to Home Screen. On Android, open Chrome’s menu and choose Install or Add to Home screen.</p>
+  </dialog>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

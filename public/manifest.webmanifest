@@ -1,0 +1,16 @@
+{
+  "id": "./",
+  "name": "Fire Ant Lab",
+  "short_name": "Fire Ant Lab",
+  "description": "An interactive 3D fire ant anatomy and locomotion simulator",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#151916",
+  "theme_color": "#151916",
+  "icons": [
+    { "src": "./icons/ant-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/ant-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/ant-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
