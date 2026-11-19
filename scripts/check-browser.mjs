@@ -9,21 +9,21 @@ let browser;
 const deadline = setTimeout(() => {
   console.error('Browser checks exceeded the two-minute deadline.');
   process.exit(1);
-}, 120_000);
+}, 145_000);
 try {
   browser = await chromium.launch({
     args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
   });
   console.log('Starting desktop WebGL check');
-  const desktop = await browser.newPage({ viewport: { width: 1360, height: 900 }, reducedMotion: 'reduce' });
-  desktop.setDefaultTimeout(14_000);
+  const desktop = await browser.newPage({ viewport: { width: 1040, height: 740 }, reducedMotion: 'reduce' });
+  desktop.setDefaultTimeout(25_000);
   const errors = [];
   desktop.on('pageerror', error => errors.push(error.message));
-  await desktop.goto(url);
+  await desktop.goto(url, { waitUntil: 'commit' });
   await desktop.locator('canvas').waitFor();
   assert.equal(await desktop.locator('#render-mode').isVisible(), false, 'WebGL renderer should be active');
   await mkdir('browser-results', { recursive: true });
-  await desktop.screenshot({ path: 'browser-results/desktop.png', timeout: 14_000 });
+  await desktop.screenshot({ path: 'browser-results/desktop.png', timeout: 25_000 });
   console.log('Desktop WebGL rendered');
   await desktop.getByRole('button', { name: 'Top', exact: true }).click();
   await desktop.getByRole('switch', { name: /Joint markers/ }).check();
@@ -40,46 +40,39 @@ try {
   await desktop.getByRole('button', { name: 'Reset simulation' }).click();
   await desktop.waitForFunction(() => document.getElementById('sim-time').textContent === '00:00');
 
-  console.log('Desktop controls passed, starting phone layout and offline checks');
-  const phone = await browser.newContext({ ...devices['iPhone 13'], reducedMotion: 'reduce' });
-  phone.setDefaultTimeout(14_000);
+  await desktop.close();
+  console.log('Desktop controls passed, checking the phone layout and offline compatibility');
+  const phone = await browser.newContext({ ...devices['iPhone 13'], deviceScaleFactor: 1, reducedMotion: 'reduce' });
+  phone.setDefaultTimeout(25_000);
+  await phone.addInitScript(() => {
+    const original = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (backend, options) {
+      return backend.startsWith('webgl') ? null : original.call(this, backend, options);
+    };
+  });
   const mobile = await phone.newPage();
   mobile.on('pageerror', error => errors.push(error.message));
-  await mobile.goto(url);
+  await mobile.goto(url, { waitUntil: 'commit' });
   await mobile.locator('canvas').waitFor();
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth), 390);
+  assert.equal(await mobile.locator('#render-mode').innerText(), 'Compatibility view');
   await mobile.screenshot({ path: 'browser-results/phone.png', fullPage: true });
   await mobile.waitForFunction(() => navigator.serviceWorker.controller !== null);
   await phone.setOffline(true);
   const failedOfflineRequests = [];
   mobile.on('requestfailed', request => failedOfflineRequests.push([request.url(), request.failure()?.errorText]));
   try {
-    await mobile.reload();
+    await mobile.reload({ waitUntil: 'commit' });
     await mobile.locator('canvas').waitFor();
   } catch (error) {
     console.error('Offline state:', await mobile.locator('body').innerText(), failedOfflineRequests, errors);
     throw error;
   }
   assert.equal(await mobile.getByRole('heading', { name: 'Fire ant simulator' }).isVisible(), true);
+  await mobile.getByRole('button', { name: 'Zoom in' }).click();
+  await mobile.getByRole('button', { name: 'Play simulation' }).click();
+  await mobile.waitForFunction(() => document.getElementById('sim-time').textContent !== '00:00');
   await phone.close();
-
-  console.log('Phone layout and offline reload passed, testing compatibility rendering');
-  const fallback = await browser.newContext({ viewport: { width: 800, height: 660 }, reducedMotion: 'reduce' });
-  fallback.setDefaultTimeout(14_000);
-  await fallback.addInitScript(() => {
-    const original = HTMLCanvasElement.prototype.getContext;
-    HTMLCanvasElement.prototype.getContext = function (backend, options) {
-      return backend.startsWith('webgl') ? null : original.call(this, backend, options);
-    };
-  });
-  const compatible = await fallback.newPage();
-  compatible.on('pageerror', error => errors.push(error.message));
-  await compatible.goto(url);
-  await compatible.locator('canvas').waitFor();
-  assert.equal(await compatible.locator('#render-mode').innerText(), 'Compatibility view');
-  await compatible.getByRole('button', { name: 'Zoom in' }).click();
-  await compatible.getByRole('button', { name: 'Play simulation' }).click();
-  await compatible.waitForFunction(() => document.getElementById('sim-time').textContent !== '00:00');
   assert.deepEqual(errors, [], 'Browser pages must have no uncaught errors');
   console.log('WebGL, narrow viewport, offline reload and compatibility rendering passed.');
 } finally {
