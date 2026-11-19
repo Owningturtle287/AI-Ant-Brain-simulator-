@@ -220,9 +220,10 @@ export class BrainView {
     const key = `${brain.tick}/${pixels}`;
     if (key === this.renderKey) return;
     this.renderKey = key;
-    if (canvas.width !== pixels) {
+    const rows = Math.round(pixels * height / width);
+    if (canvas.width !== pixels || canvas.height !== rows) {
       canvas.width = pixels;
-      canvas.height = Math.round(pixels * height / width);
+      canvas.height = rows;
     }
     ctx.setTransform(canvas.width / width, 0, 0, canvas.height / height, 0, 0);
     ctx.drawImage(this.base, 0, 0, width, height);

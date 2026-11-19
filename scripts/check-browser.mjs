@@ -28,7 +28,7 @@ try {
   await desktop.screenshot({ path: 'browser-results/desktop.png', timeout: 25_000 });
   console.log('Desktop WebGL rendered');
   assert.equal(await desktop.locator('#brain-count').textContent(), '250,000');
-  await desktop.getByLabel('Region', { exact: true }).selectOption({ label: 'Antennal lobes' });
+  await desktop.getByRole('combobox', { name: 'Region', exact: true }).selectOption({ label: 'Antennal lobes' });
   await desktop.getByRole('button', { name: 'Inspect neuron' }).click();
   assert.equal(await desktop.locator('#neuron-sources li').count(), 3);
   await desktop.getByRole('button', { name: 'Rear view' }).click();
