@@ -1,7 +1,9 @@
 import { seeded } from './brain.js';
 import { ColonyMap } from './colony-map.js';
-import { inheritPolicy, policyWeightCount, selectAction, taskNames, updatePolicy } from './colony-policy.js';
+import { acceptsPolicy, inheritPolicy, selectAction, taskNames, updatePolicy } from './colony-policy.js';
 import { makeProbes, TouchField } from './touch.js';
+import { BodySpace } from './body-space.js';
+import { addGrime, beginGroom, completeGroom, freshGrime, groomingActions, inheritReach, pickUpGrime, scrubGroom } from './grooming.js';
 
 export const defaultSettings = Object.freeze({
   eggSeconds: 10, stageSeconds: 60, ageLimit: 0, needRate: 1, resourceDensity: 1,
@@ -11,13 +13,12 @@ export const broodStages = ['Egg', 'Larva', 'Pupa'];
 export const colonyStep = .1;
 const clamp = (value, min = 0, max = 1) => Math.max(min, Math.min(max, value));
 const gap = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
-const angularError = (goal, heading) => Math.atan2(Math.sin(goal - heading), Math.cos(goal - heading));
 const actionResource = {
   eat: 'food', drink: 'water', queenFood: 'food', queenWater: 'water',
   broodFood: 'food', peerFood: 'food', peerWater: 'water',
 };
 export const queenHeading = -.13;
-export const nursery = { x: -2.90, z: 1.87 };
+export const nursery = { x: -2.61, z: -3.48 };
 const nest = { x: 0, z: 0 };
 const queenMouth = { x: 2.20, z: .29 };
 const queenDose = .58;
@@ -34,9 +35,8 @@ export class Colony {
     this.settings = { ...defaultSettings, ...settings };
     this.seed = seed;
     this.run = 0;
-    this.best = Array.isArray(history?.weights) && history.weights.length === policyWeightCount &&
-      history.weights.every(Number.isFinite) && Number.isFinite(history.score)
-      ? { score: history.score, weights: history.weights.slice() } : null;
+    this.best = acceptsPolicy(history?.weights) && Number.isFinite(history.score)
+      ? { score: history.score, weights: history.weights.slice(), reach: history.reach } : null;
     this.restart();
   }
 
@@ -46,7 +46,9 @@ export class Colony {
     this.time = 0;
     this.random = seeded((this.seed ^ Math.imul(this.run, 8419)) || 1);
     this.map = new ColonyMap(this.seed, this.settings);
-    this.queen = { ...nest, food: .94, water: .94, living: true, events: [] };
+    this.queen = { ...nest, heading: queenHeading, queen: true, food: .94, water: .94, living: true, events: [] };
+    this.space = new BodySpace(this.map.height);
+    this.space.record(this.queen);
     this.touch = new TouchField(this);
     this.eggClock = 0;
     this.nextId = 1;
@@ -54,24 +56,30 @@ export class Colony {
     this.workers = [];
     this.messages = [];
     this.signals = { food: .06, water: .06, brood: 0 };
-    this.stats = { eggs: 0, hatched: 0, deaths: 0, care: 0, delivered: 0, shared: 0, updates: 0, exchanges: 0 };
+    this.stats = { eggs: 0, hatched: 0, deaths: 0, care: 0, delivered: 0, shared: 0, updates: 0, exchanges: 0, grooming: 0 };
     this.failed = null;
     this.failureTime = 0;
     this.championCheck = 0;
-    this.previousWorker = this.spawnWorker(this.best?.weights, 0, 1.55, .13);
+    this.previousWorker = this.spawnWorker(this.best?.weights, 0, 4.39, .77, this.best?.reach);
   }
 
-  spawnWorker(weights, generation, x, z) {
+  spawnWorker(weights, generation, x, z, reach) {
     const worker = {
       id: this.nextId++, x, z, heading: Math.atan2(-z, x), speed: 0, age: 0,
-      food: .88, water: .9, fatigue: .05, dirt: .08, generation, weights: inheritPolicy(weights, 0, this.random),
+      food: .88, water: .9, fatigue: .05, generation, weights: inheritPolicy(weights, 0, this.random),
+      grime: freshGrime(), groomSkill: inheritReach(reach, 0, this.random), grooming: null, lastCleaned: null,
+      lift: 0, blocked: 0, bypass: undefined,
       hold: null, cargo: null, task: null, state: 'Assessing nest', known: new Set(),
       recall: { food: 0, water: 0, brood: 0 }, requests: { food: 0, water: 0, until: 0 },
       scanAt: 0, reward: 0, looking: 0, turn: 0,
       probes: makeProbes(), peerSignals: new Map(), broodSignals: new Map(), lastTouch: null, slowUntil: 0,
     };
-    worker.previous = { x, z, heading: worker.heading };
+    const vacant = this.space.place(worker, worker.heading);
+    if (!vacant) return null;
+    Object.assign(worker, vacant);
+    worker.previous = { ...vacant, lift: 0 };
     this.workers.push(worker);
+    this.space.record(worker);
     return worker;
   }
 
@@ -82,9 +90,10 @@ export class Colony {
     while (occupied.has(slot)) slot++;
     const id = this.nextId++;
     this.brood.push({
-      id, slot, ...stackPosition(slot, -3.20, -.71, .76), stage: 0, age: 0, care: .94, food: .80, moved: false,
+      id, slot, ...stackPosition(slot, -3.63, -1.56, .53), stage: 0, age: 0, care: .94, food: .80, moved: false,
       parentId: parent.id, generation: parent.generation + 1,
       weights: inheritPolicy(parent.weights, this.settings.mutation, this.random),
+      reach: inheritReach(parent.groomSkill, this.settings.mutation, this.random),
     });
     this.stats.eggs++;
     this.queenEvent('egg', { id: this.nextId - 1 });
@@ -119,9 +128,12 @@ export class Colony {
           const exitDistance = Math.hypot(larva.x, larva.z);
           const x = exitDistance < 2.2 ? 2.2 * Math.cos(larva.id) : larva.x;
           const z = exitDistance < 2.2 ? 2.2 * Math.sin(larva.id) : larva.z;
-          this.previousWorker = this.spawnWorker(larva.weights, larva.generation, x, z);
-          this.stats.hatched++;
-          continue;
+          const adult = this.spawnWorker(larva.weights, larva.generation, x, z, larva.reach);
+          if (adult) {
+            this.previousWorker = adult;
+            this.stats.hatched++;
+            continue;
+          }
         }
       }
       survivors.push(larva);
@@ -150,6 +162,7 @@ export class Colony {
       this.layEgg();
     }
     this.updateBrood(dt);
+    this.space.rebuild(this.queen, this.workers);
     this.signals.food = 1 - this.queen.food;
     this.signals.water = 1 - this.queen.water;
     this.signals.brood = this.brood.reduce((urgent, brood) => Math.max(urgent,
@@ -159,13 +172,14 @@ export class Colony {
       worker.previous.x = worker.x;
       worker.previous.z = worker.z;
       worker.previous.heading = worker.heading;
+      worker.previous.lift = worker.lift;
       worker.age += dt;
       worker.food = clamp(worker.food - dt * (.0033 + worker.speed * .0009) * need);
       worker.water = clamp(worker.water - dt * (.0046 + worker.speed * .0011) * need);
       worker.fatigue = clamp(worker.fatigue + dt * (worker.speed > .2 ? .018 : -.012));
-      worker.dirt = clamp(worker.dirt + dt * (worker.speed > .2 ? .016 : .004));
+      pickUpGrime(worker, this.map.height, this.time, dt);
       if (worker.food && worker.water && (!this.settings.ageLimit || worker.age < this.settings.ageLimit)) {
-        this.touch.sample(worker, dt);
+        if (!worker.grooming) this.touch.sample(worker, dt);
         this.runWorker(worker, dt);
       }
     }
@@ -198,7 +212,7 @@ export class Colony {
       - this.stats.deaths * .52 + Math.min(this.queen.food, this.queen.water) * 2;
     if (this.best && this.best.score >= score) return;
     const parent = this.workers.reduce((best, worker) => worker.reward > best.reward ? worker : best, this.previousWorker);
-    this.best = { score, weights: Array.from(parent.weights) };
+    this.best = { score, weights: Array.from(parent.weights), reach: { ...parent.groomSkill } };
   }
 
   sense(worker) {
@@ -222,8 +236,15 @@ export class Colony {
     worker.requests.until = this.time + 1.8;
   }
 
-  receiveTouch(worker, target, kind) {
+  receiveTouch(worker, target, kind, side) {
     worker.lastTouch = { kind, id: target.id, time: this.time };
+    if (side) {
+      const part = side < 0 ? 'leftAntenna' : 'rightAntenna';
+      if (kind === 'water') addGrime(worker, part, -.058);
+      else if (kind === 'ground' || kind === 'stone' || kind === 'plant') addGrime(worker, part, .025);
+      else if (kind === 'worker') addGrime(worker, part, (target.grime.head - worker.grime[part]) * .045);
+      else if (kind === 'food' || kind === 'brood') addGrime(worker, part, .012);
+    }
     if (kind === 'worker') {
       const previous = worker.peerSignals.get(target);
       const newExchange = !previous || this.time - previous.exchangeAt > 2.5;
@@ -309,7 +330,9 @@ export class Colony {
     }
     if (!worker.cargo) {
       add('rest', worker.fatigue, worker);
-      add('groom', worker.dirt, worker);
+      if (worker.lift < .12) for (const { action, key } of groomingActions) {
+        if (worker.grime[key] > .23) add(action, worker.grime[key], worker, 1 - worker.fatigue);
+      }
     }
     const surroundings = Number(Boolean(resources.food)) + Number(Boolean(resources.water));
     add('explore', .23 + .25 * (2 - surroundings), worker, worker.recall.brood);
@@ -327,19 +350,38 @@ export class Colony {
         if (signal.until < this.time) worker.broodSignals.delete(brood);
       }
     }
+    if (worker.grooming) {
+      worker.speed *= Math.exp(-15 * dt);
+      worker.turn = 0;
+      const obstacles = this.space.near(worker, 2.9).flatMap(other => other.lobes);
+      if (scrubGroom(worker, this.time, dt, obstacles, this.map.height) >= 1) {
+        if (worker.grooming.removed > .015) {
+          worker.lastCleaned = worker.grooming.key;
+          this.stats.grooming++;
+        }
+        this.finish(worker, completeGroom(worker, this.settings.learning));
+      }
+      return;
+    }
     if (!worker.task) {
       const choice = selectAction(worker.weights, this.candidates(worker), this.random, this.settings.learning ? .15 : .04);
       const { action } = choice;
       let target = choice.target;
       if (action === 'explore') {
-        const towardsNest = gap(worker, nest) > 37 && (this.random() < .70 || worker.cargo);
+        const limit = this.workers.length === 1 ? 13 : 32;
+        const towardsNest = gap(worker, nest) > limit && (this.random() < .82 || worker.cargo);
         const direction = towardsNest ? Math.atan2(worker.z, -worker.x) : worker.heading + (this.random() - .5) * 2.85;
         const distance = 4.4 + this.random() * 7;
         target = { x: worker.x + Math.cos(direction) * distance, z: worker.z - Math.sin(direction) * distance };
       }
       worker.task = { ...choice, target, phase: worker.cargo ? 'return' : 'approach', starts: this.time,
         ready: 0, known: worker.known.size };
+      worker.ringRoute = null;
       worker.looking = (this.random() - .5) * .45;
+      if (action.startsWith('groom:')) {
+        const trial = (this.random() - .5) * .92;
+        worker.grooming = beginGroom(worker, action.slice(6), trial, this.time);
+      }
     }
 
     const task = worker.task;
@@ -353,13 +395,15 @@ export class Colony {
       return;
     }
     worker.state = taskNames[action];
-    const dwell = action === 'groom' ? 1.65 : action === 'rest' ? 1.9 : .42;
+    if (worker.grooming) return;
+    const dwell = action === 'rest' ? 1.9 : .42;
     if (action === 'tend' && !this.brood.includes(task.pickedUp ?? target)) {
       this.finish(worker, 0);
       return;
     }
 
-    const stop = target === worker ? 0 : target === queenMouth ? 1.33 : target.kind === 'water' ? 1.24 : target.kind ? .93 : .92;
+    const stop = target === worker ? 0 : target === queenMouth ? 1.62 : task.recipient ? 2.18 :
+      target.kind === 'water' ? 1.40 : target.kind ? 1.18 : action === 'explore' ? .86 : 1.75;
     const distance = gap(worker, target);
     const stationary = distance <= stop + .12;
     if (distance > stop + .47) task.ready = 0;
@@ -374,25 +418,18 @@ export class Colony {
       : task.phase === 'return' ? (worker.cargo === 'water' ? 'Carrying water' : 'Carrying food')
         : target.kind ? (target.kind === 'water' ? 'Seeking water' : 'Seeking food') : taskNames[action];
     const goal = Math.atan2(worker.z - target.z, target.x - worker.x);
-    const error = angularError(goal, worker.heading);
-    worker.turn = clamp(error * 3.15, -2.0, 2.0);
-    worker.heading += worker.turn * dt;
     const urgency = task.features[1];
     const cruise = (1.34 + .83 * urgency) * (1 - .19 * worker.fatigue) * (worker.cargo ? .85 : 1);
-    const alignment = Math.max(0, Math.cos(error)) ** 2;
-    const pace = cruise * alignment * clamp((distance - stop) * 1.8, .20, 1) * (worker.slowUntil > this.time ? .52 : 1);
-    worker.speed += (pace - worker.speed) * (1 - Math.exp(-6.2 * dt));
-    worker.x += Math.cos(worker.heading) * worker.speed * dt;
-    worker.z -= Math.sin(worker.heading) * worker.speed * dt;
+    const pace = cruise * clamp((distance - stop) * 1.8, .20, 1) * (worker.slowUntil > this.time ? .52 : 1);
+    this.space.move(worker, goal, pace, dt, target, !worker.cargo);
   }
 
   resolve(worker) {
     const { task } = worker;
     const { action, target } = task;
-    if (action === 'rest' || action === 'groom') {
-      const field = action === 'rest' ? 'fatigue' : 'dirt';
-      const improvement = worker[field];
-      worker[field] *= .26;
+    if (action === 'rest') {
+      const improvement = worker.fatigue;
+      worker.fatigue *= .26;
       this.finish(worker, improvement * .83);
       return;
     }

@@ -1,6 +1,7 @@
 import './style.css';
 import { ColonyArena } from './arena.js';
 import { installBrainPanel } from './brain-panel.js';
+import { groomingActions, groomZones } from './grooming.js';
 
 const $ = id => document.getElementById(id);
 const icons = {
@@ -77,6 +78,19 @@ function controls(arena) {
   const drawer = $('settings-panel');
   const settingsButton = $('settings-button');
   const brainDetails = $('brain-details');
+  const card = $('ant-inspector');
+  const dirt = $('ant-dirt');
+  const indicators = {};
+  for (const { key, zone } of groomingActions) {
+    const row = document.createElement('li'), tag = document.createElement('span');
+    const meter = document.createElement('progress'), readout = document.createElement('strong');
+    tag.textContent = zone.name;
+    meter.max = 1;
+    meter.setAttribute('aria-label', zone.name + ' dirt');
+    row.append(tag, meter, readout);
+    $('dirt-list').append(row);
+    indicators[key] = { meter, readout };
+  }
   const picker = $('worker-picker');
   const views = [...document.querySelectorAll('[data-view]')];
   let brainReady = false;
@@ -102,10 +116,64 @@ function controls(arena) {
     refreshBrain();
     if (!open) settingsButton.focus();
   }
+  function closeCard() {
+    arena.flags.selectedId = null;
+    card.hidden = true;
+    arena.dirty = true;
+  }
+  function updateCard() {
+    const id = arena.flags.selectedId;
+    if (id === null) { card.hidden = true; return; }
+    const agent = id === 0 ? colony.queen : colony.workers.find(worker => worker.id === id);
+    if (!agent || agent.living === false) { closeCard(); return; }
+    const queen = !!agent.queen;
+    text('ant-title', queen ? 'Queen' : 'Worker ' + id);
+    text('ant-activity', queen ? 'Nest queen' : agent.grooming ? 'Cleaning · ' + groomZones[agent.grooming.key].name
+      : agent.lift > .15 ? 'Climbing' : agent.state);
+    text('ant-food', percent(agent.food));
+    text('ant-water', percent(agent.water));
+    const seconds = Math.floor(queen ? colony.time : agent.age);
+    text('ant-age', seconds >= 60 ? `${Math.floor(seconds / 60)}m ${seconds % 60}s` : seconds + 's');
+    text('ant-generation-label', queen ? 'Eggs laid' : 'Generation');
+    text('ant-generation', queen ? colony.stats.eggs : agent.generation);
+    text('ant-contact-label', queen ? 'Deliveries' : 'Last contact');
+    text('ant-contact', queen ? colony.stats.delivered : agent.lastTouch?.kind ?? '—');
+    text('ant-groomed-label', queen ? 'Brood' : 'Last cleaned');
+    text('ant-groomed', queen ? colony.brood.length : groomZones[agent.lastCleaned]?.name ?? '—');
+    dirt.hidden = queen;
+    $('open-ant-brain').hidden = queen;
+    text('follow-ant', queen ? 'Focus nest' : 'Follow worker');
+    if (!queen && dirt.open) for (const [key, { meter, readout }] of Object.entries(indicators)) {
+      const value = agent.grime[key];
+      meter.value = value;
+      readout.textContent = percent(value);
+    }
+  }
+  arena.onPick = () => {
+    if (!drawer.hidden) openSettings(false);
+    dirt.open = false;
+    updateCard();
+    card.hidden = false;
+  };
+  dirt.addEventListener('toggle', updateCard);
+  $('close-ant').addEventListener('click', closeCard);
+  $('follow-ant').addEventListener('click', () => {
+    arena.setView(arena.flags.selectedId === 0 ? 'nest' : 'worker');
+    updateStats();
+  });
+  $('open-ant-brain').addEventListener('click', () => {
+    if (arena.flags.selectedId > 0) arena.inspect(arena.flags.selectedId);
+    closeCard();
+    brainDetails.open = true;
+    openSettings(true);
+    brainDetails.querySelector('summary').scrollIntoView({ block: 'nearest' });
+  });
   settingsButton.addEventListener('click', () => openSettings(drawer.hidden));
   $('settings-close').addEventListener('click', () => openSettings(false));
   document.addEventListener('keydown', event => {
-    if (event.key === 'Escape' && !drawer.hidden) openSettings(false);
+    if (event.key !== 'Escape') return;
+    if (!drawer.hidden) openSettings(false);
+    else if (!card.hidden) closeCard();
   });
   brainDetails.addEventListener('toggle', refreshBrain);
   picker.addEventListener('change', () => {
@@ -155,7 +223,10 @@ function controls(arena) {
       $(`queen-${kind}`).value = queen[kind];
       text(`queen-${kind}-value`, percent(queen[kind]));
     }
-    text('worker-state', arena.selected?.state ?? 'Colony stopped');
+    const current = arena.selected;
+    text('worker-state', current?.grooming ? 'Cleaning ' + groomZones[current.grooming.key].name.toLowerCase()
+      : current?.state ?? 'Colony stopped');
+    updateCard();
     $('world').dataset.paused = arena.flags.paused;
     play.setAttribute('aria-label', arena.flags.paused ? 'Play simulation' : 'Pause simulation');
     const glyph = play.querySelector('i');

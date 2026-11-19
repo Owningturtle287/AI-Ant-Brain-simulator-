@@ -6,6 +6,8 @@ import { WorkerRig } from './worker.js';
 import { nursery, queenHeading } from './colony.js';
 import { QueenActing } from './queen-acting.js';
 import { WorkerBatches } from './worker-batches.js';
+import { bodyShells } from './body-space.js';
+import { groomPose } from './grooming.js';
 
 const sphere = new THREE.SphereGeometry(1, 12, 8);
 const grit = new THREE.IcosahedronGeometry(1, 1);
@@ -23,6 +25,7 @@ const materials = {
   larva: new THREE.MeshStandardMaterial({ color: '#e0c69a', roughness: .73 }),
   pupa: new THREE.MeshStandardMaterial({ color: '#c69a70', roughness: .76 }),
   signal: new THREE.MeshBasicMaterial({ color: '#a4d7b5', transparent: true, opacity: .65, depthWrite: false, side: THREE.DoubleSide }),
+  selected: new THREE.MeshBasicMaterial({ color: '#e9b985', transparent: true, opacity: .75, depthWrite: false, side: THREE.DoubleSide }),
 };
 
 function ellipsoid(parent, material, x, y, z, sx, sy, sz) {
@@ -135,12 +138,31 @@ export class ColonyScene {
     makeNursery(this.nest);
     this.needs = new THREE.Mesh(ring, materials.signal);
     this.nest.add(this.needs);
+    this.selectionRing = new THREE.Mesh(ring, materials.selected);
+    this.scene.add(this.selectionRing);
+    this.selectionRing.visible = false;
     this.detailed = [];
+    this.visualShells = new Map();
     this.queenActing = new QueenActing();
     this.queenTransfer = ellipsoid(this.entities, materials.water, 0, 0, 0, .10, .10, .10);
     this.queenTransfer.visible = false;
     this.eggOrigin = new THREE.Vector3();
     this.brood = [];
+  }
+
+  pick(raycaster) {
+    const meshes = [];
+    const collect = (rig, id) => {
+      rig.root.updateWorldMatrix(true, true);
+      rig.root.traverseVisible(part => {
+        if (!part.isMesh || !part.geometry.userData.profile) return;
+        part.userData.antId = id;
+        meshes.push(part);
+      });
+    };
+    if (this.queenPivot.visible) collect(this.queen, 0);
+    for (const entry of this.detailed) if (entry.id !== null) collect(entry.rig, entry.id);
+    return raycaster.intersectObjects(meshes, false)[0]?.object.userData.antId ?? null;
   }
 
   setWorld(world, orbitTarget) {
@@ -241,23 +263,49 @@ export class ColonyScene {
       }
     }
     this.queenPivot.visible = colony.queen.living;
+    this.visualShells.clear();
+    for (const worker of colony.workers) {
+      const previous = worker.previous;
+      const x = THREE.MathUtils.lerp(previous.x, worker.x, alpha);
+      const z = THREE.MathUtils.lerp(previous.z, worker.z, alpha);
+      const heading = THREE.MathUtils.lerp(previous.heading, worker.heading, alpha);
+      const lift = THREE.MathUtils.lerp(previous.lift ?? 0, worker.lift, alpha);
+      this.visualShells.set(worker, { x, z, heading, lift,
+        lobes: bodyShells(worker, this.world.height, x, z, heading, lift) });
+    }
+    this.visualShells.set(colony.queen, { lobes: bodyShells(colony.queen, this.world.height) });
+    const highlighted = flags.selectedId === 0 ? colony.queen
+      : colony.workers.find(worker => worker.id === flags.selectedId);
+    this.selectionRing.visible = !!highlighted && highlighted.living !== false;
+    if (this.selectionRing.visible) {
+      const at = highlighted.queen ? highlighted : this.visualShells.get(highlighted);
+      this.selectionRing.position.set(at.x, this.world.height(at.x, at.z) + .035, at.z);
+      this.selectionRing.scale.setScalar(highlighted.queen ? 1.24 : .58);
+    }
     this.needs.visible = flags.signals && colony.queen.living;
     const urgency = Math.max(colony.signals.food, colony.signals.water);
     this.needs.position.y = .037;
     this.needs.scale.setScalar(2.16 + urgency * .8 + .22 * Math.sin(colony.time * 3));
     materials.signal.opacity = .24 + urgency * .56;
     const performance = this.queenActing.step(colony.queen.events, visualDt, colony.time);
-    this.updateQueen(performance, visualDt);
+    this.updateQueen(performance, visualDt, this.obstacles(colony, colony.queen, 4.25));
     this.updateBrood(colony.brood, performance);
-    this.updateWorkers(colony.workers, selected, dt, flags, alpha);
+    this.updateWorkers(colony, selected, dt, flags);
   }
 
-  updateQueen(performance, dt) {
+  obstacles(colony, body, distance = 3.75) {
+    return colony.space.near(body, distance).flatMap(entry => this.visualShells.get(entry.body)?.lobes ?? []);
+  }
+
+  updateQueen(performance, dt, obstacles) {
     this.queenMotion.clock += dt;
     this.queenTransfer.visible = false;
     if (!this.queenPivot.visible) return;
     if (!dt && !performance) return;
-    this.queen.update(this.queenMotion, false, false, 0, performance);
+    const scale = this.queenPivot.scale.x;
+    const local = obstacles.map(lobe => ({ ...lobe, x: lobe.x / scale, y: lobe.y / scale,
+      z: lobe.z / scale, a: lobe.a / scale, b: lobe.b / scale, c: lobe.c / scale }));
+    this.queen.update(this.queenMotion, false, false, 0, { ...performance, obstacles: local, antennaObstacles: obstacles });
     if (!performance) return;
     if (performance.event.kind === 'egg') {
       this.queen.gaster.localToWorld(this.eggOrigin.set(-.97, -.145, 0));
@@ -294,8 +342,8 @@ export class ColonyScene {
     for (let i = brood.length; i < this.brood.length; i++) this.brood[i].visible = false;
   }
 
-  updateWorkers(workers, selected, dt, flags, alpha) {
-    const visible = workers.filter(worker => {
+  updateWorkers(colony, selected, dt, flags) {
+    const visible = colony.workers.filter(worker => {
       workerBounds.center.set(worker.x, .60, worker.z);
       return inView.intersectsSphere(workerBounds);
     });
@@ -325,17 +373,18 @@ export class ColonyScene {
         motion.reset(worker.x, worker.z, worker.heading);
       }
       rig.root.visible = true;
+      const pose = this.visualShells.get(worker);
+      const groom = worker.grooming ? groomPose(worker.grooming, colony.time) : null;
       if (dt > 0) {
-        const previous = worker.previous;
         motion.follow(Math.min(dt, .11), {
-          x: THREE.MathUtils.lerp(previous.x, worker.x, alpha),
-          z: THREE.MathUtils.lerp(previous.z, worker.z, alpha),
-          heading: THREE.MathUtils.lerp(previous.heading, worker.heading, alpha),
-          speed: worker.speed, turn: worker.turn, state: worker.state, looking: worker.looking,
+          ...pose, speed: worker.speed, turn: worker.turn, state: worker.state, looking: worker.looking, groom,
         });
       }
+      const obstacles = this.obstacles(colony, worker);
       rig.update(motion, flags.joints && selected === worker, flags.contacts && selected === worker,
-        flags.sting && selected === worker ? 1 : 0, { probes: worker.probes });
+        flags.sting && selected === worker ? 1 : 0, { probes: groom ? null : worker.probes, obstacles,
+          antennaObstacles: obstacles, groom });
+      rig.setGrime(worker.grime);
       cargo.visible = !!worker.cargo;
       cargo.material = worker.cargo === 'water' ? materials.water : materials.crumb;
       this.batches?.add(rig.root);

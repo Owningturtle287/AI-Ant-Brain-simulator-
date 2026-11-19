@@ -16,7 +16,7 @@ export class ColonyArena {
   constructor(host, settings, seed, history) {
     this.host = host;
     this.colony = new Colony(settings, seed, history);
-    this.flags = { paused: false, rate: 1, signals: true, joints: false, contacts: false, sting: false };
+    this.flags = { paused: false, rate: 1, signals: true, joints: false, contacts: false, sting: false, selectedId: null };
     this.brainInputs = { odor: [0, 0], contact: [0, 0], vision: 0, touch: 0, turn: 0, pace: 0 };
     this.mode = 'nest';
     this.workerId = 1;
@@ -73,6 +73,7 @@ export class ColonyArena {
     this.scene.add(fill);
     this.lowPower = this.software || matchMedia('(pointer: coarse)').matches;
     this.objects = new ColonyScene(this.scene, this.renderer, this.software, this.lowPower);
+    this.bindPicking(canvas);
     this.track = new THREE.Vector3();
     this.shift = new THREE.Vector3();
     this.presentWorld = null;
@@ -97,6 +98,37 @@ export class ColonyArena {
 
   get selected() {
     return this.colony.workers.find(worker => worker.id === this.workerId) ?? this.colony.workers[0];
+  }
+
+  bindPicking(canvas) {
+    const ray = new THREE.Raycaster();
+    const cursor = new THREE.Vector2();
+    const active = new Set();
+    let press = null;
+    canvas.addEventListener('pointerdown', event => {
+      active.add(event.pointerId);
+      press = event.button === 0 && active.size === 1 ? { id: event.pointerId, x: event.clientX, y: event.clientY } : null;
+    });
+    canvas.addEventListener('pointermove', event => {
+      if (press?.id === event.pointerId && Math.hypot(event.clientX - press.x, event.clientY - press.y) > 7) press = null;
+    });
+    canvas.addEventListener('pointercancel', event => { active.delete(event.pointerId); press = null; });
+    canvas.addEventListener('lostpointercapture', event => { active.delete(event.pointerId); });
+    canvas.addEventListener('pointerup', event => {
+      active.delete(event.pointerId);
+      if (press?.id !== event.pointerId || Math.hypot(event.clientX - press.x, event.clientY - press.y) > 7) return;
+      press = null;
+      const rect = canvas.getBoundingClientRect();
+      cursor.set((event.clientX - rect.left) / rect.width * 2 - 1, 1 - (event.clientY - rect.top) / rect.height * 2);
+      this.camera.updateMatrixWorld();
+      ray.setFromCamera(cursor, this.camera);
+      const id = this.objects.pick(ray);
+      if (id === null) return;
+      this.flags.selectedId = id;
+      if (id > 0) this.inspect(id);
+      this.onPick?.(id);
+      this.dirty = true;
+    });
   }
 
   inspect(id) {
@@ -140,6 +172,7 @@ export class ColonyArena {
 
   prepareRun() {
     this.workerId = 1;
+    this.flags.selectedId = null;
     this.accumulated = 0;
     this.brain?.reset();
     this.onBrain?.();

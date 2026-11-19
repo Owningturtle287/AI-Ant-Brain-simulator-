@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { ColonyMap } from '../src/colony-map.js';
 import { Colony, defaultSettings } from '../src/colony.js';
 import { QueenActing } from '../src/queen-acting.js';
+import { BodySpace, bodyShells, segmentBlocked, shellsOverlap } from '../src/body-space.js';
+import { beginGroom, completeGroom, scrubGroom } from '../src/grooming.js';
 
 const advance = (colony, seconds) => {
   for (let tick = 0; tick < seconds * 10; tick++) colony.step();
@@ -66,7 +68,7 @@ test('workers change their policy, nurse the brood, and grow a colony with the d
   let carried = false;
   for (let i = 0; i < 3500 && !colony.failed; i++) {
     colony.step();
-    activities.add(founder.state);
+    for (const worker of colony.workers) activities.add(worker.state);
     carried ||= colony.brood.some(brood => brood.carriedBy);
   }
   assert.equal(colony.failed, null);
@@ -75,6 +77,7 @@ test('workers change their policy, nurse the brood, and grow a colony with the d
   assert.ok(colony.stats.care && colony.stats.delivered && colony.stats.updates);
   assert.ok(activities.has('Grooming') && activities.has('Resting and scanning'));
   assert.ok(carried);
+  assert.ok(colony.stats.grooming > 0);
   assert.notDeepEqual(founder.weights, startingPolicy);
   assert.ok(colony.best?.weights.length > 0);
 });
@@ -133,4 +136,42 @@ test('the queen records and animates both deliveries and egg laying', () => {
   }
   assert.deepEqual(observed, new Set(['egg', 'water', 'food']));
   assert.ok(hasCurl && drinking && eating);
+});
+
+test('head-on workers travel around each other without overlapping their body shapes', () => {
+  const ground = () => 0;
+  const space = new BodySpace(ground);
+  const queen = { x: 0, z: 0, heading: 0, queen: true, living: false };
+  const strangers = [{ x: -3.9, z: 15, heading: 0, speed: 0, lift: 0 }, { x: 3.9, z: 15, heading: Math.PI, speed: 0, lift: 0 }];
+  const goals = [{ x: 5, z: 15 }, { x: -5, z: 15 }];
+  let deviation = 0;
+  for (let i = 0; i < 100; i++) {
+    space.rebuild(queen, strangers);
+    for (const [index, ant] of strangers.entries()) {
+      const goal = goals[index];
+      if (Math.hypot(ant.x - goal.x, ant.z - goal.z) < .6) continue;
+      space.move(ant, Math.atan2(ant.z - goal.z, goal.x - ant.x), 1.6, .1, goal, false);
+      deviation = Math.max(deviation, Math.abs(ant.z - 15));
+      assert.equal(shellsOverlap(bodyShells(strangers[0], ground), bodyShells(strangers[1], ground)), false);
+    }
+  }
+  assert.ok(strangers[0].x > 1 && strangers[1].x < -1 && deviation > .23);
+  const shell = bodyShells(strangers[0], ground);
+  const { x, y, z } = shell[0];
+  assert.ok(segmentBlocked(shell, { x, y, z: z - 1 }, { x, y, z: z + 1 }));
+  assert.equal(segmentBlocked(shell, { x, y: y + 1, z: z - 1 }, { x, y: y + 1, z: z + 1 }), false);
+});
+
+test('grooming removes dirt from the touched patch and learns from the result', () => {
+  const colony = new Colony();
+  const worker = colony.workers[0];
+  worker.grime.abdomen = .75;
+  worker.grime.head = .60;
+  worker.grooming = beginGroom(worker, 'abdomen', .18, 0);
+  for (let i = 0; i <= 24; i++) scrubGroom(worker, i / 10, .1);
+  assert.ok(worker.grime.abdomen < .45);
+  assert.equal(worker.grime.head, .60);
+  assert.ok(completeGroom(worker, true) > 0);
+  assert.notEqual(worker.groomSkill.abdomen, 0);
+  assert.equal(worker.groomSkill.head, 0);
 });

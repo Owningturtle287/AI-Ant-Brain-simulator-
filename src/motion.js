@@ -80,6 +80,8 @@ export class AntMotion {
     this.x = x;
     this.z = z;
     this.heading = heading;
+    this.climb = 0;
+    this.drift = 0;
     this.yawRate = 0;
     this.turnIntent = 0;
     this.stride = 0;
@@ -136,7 +138,7 @@ export class AntMotion {
   advance(pose, speed, yawRate, duration) {
     const heading = pose.heading + yawRate * duration;
     // Integrate a constant-speed arc in the world coordinates shared by the feet.
-    const midHeading = (heading + pose.heading) * .5;
+    const midHeading = (heading + pose.heading) * .5 + this.drift;
     const halfTurn = (heading - pose.heading) * .5;
     const span = speed * duration * (Math.abs(halfTurn) < .001 ? 1 : Math.sin(halfTurn) / halfTurn);
     const limit = typeof this.terrain === 'function' ? Infinity : arenaLimit;
@@ -270,13 +272,18 @@ export class AntMotion {
 
   follow(dt, agent) {
     this.clock += dt;
-    this.distance += Math.hypot(agent.x - this.x, agent.z - this.z);
+    const dx = agent.x - this.x, dz = agent.z - this.z;
+    const travel = Math.hypot(dx, dz);
+    this.distance += travel;
+    if (travel > .002) this.drift = angleDelta(agent.heading, Math.atan2(-dz, dx));
+    else if (agent.speed < .1) this.drift = 0;
     this.speed = agent.speed;
     this.yawRate = agent.turn;
     this.turnIntent = agent.turn / maximumYawRate;
     this.x = agent.x;
     this.z = agent.z;
     this.heading = agent.heading;
+    this.climb = agent.lift ?? 0;
     this.updateGait(dt, agent);
   }
 
@@ -329,24 +336,27 @@ export class AntMotion {
     const step = this.stride * twoPi;
     const turn = this.yawRate / maximumYawRate;
     const walkingLift = .022 * clamp(this.speed / 2.1, 0, 1);
-    this.pose.height = approach(this.pose.height, standingHeight + walkingLift + average * .85 + support * .15 + Math.cos(step * 2) * .013 * activity, 17, dt);
+    this.pose.height = approach(this.pose.height, standingHeight + this.climb + walkingLift + average * .85 +
+      support * .15 + Math.cos(step * 2) * .013 * activity, 17, dt);
     this.pose.pitch = approach(this.pose.pitch, Math.atan2(front - rear, 1.02) + Math.sin(step + .5) * .033 * activity, 13, dt);
     this.pose.roll = approach(this.pose.roll, Math.atan2(left - right, .94) + Math.cos(step) * .043 * activity - turn * .10, 14, dt);
     const scan = Math.sin(this.clock * 2.4) * .069 + Math.sin(this.clock * .84) * .038;
-    const grooming = agent?.state === 'Grooming';
+    const groom = agent?.groom;
     const resting = agent?.state === 'Resting and scanning';
-    const scanYaw = grooming ? .24 * Math.sin(this.clock * 5) :
+    const scanYaw = groom ? -groom.side * .31 * groom.reach :
       resting ? agent.looking * Math.sin(this.clock * 2.1) : 0;
     const target = {
       headYaw: turn * .44 + this.turnIntent * .19 + scan * (1 - activity * .74) + Math.sin(step + .44) * .032 * activity + scanYaw,
       headPitch: -.24 - this.pose.pitch * .39 + Math.sin(step * 2 + .65) * .037 * activity
-        - (grooming ? .12 * (.5 + .5 * Math.sin(this.clock * 7)) : 0),
+        - (groom ? .19 * groom.reach : 0),
       headRoll: -this.pose.roll * .50 + Math.sin(step - .2) * .031 * activity - turn * .038,
-      waistYaw: -turn * .238 + Math.sin(step - .8) * .047 * activity,
+      waistYaw: -turn * .238 + Math.sin(step - .8) * .047 * activity
+        + (groom?.part === 'abdomen' ? groom.side * .16 * groom.reach : 0),
       waistPitch: .024 - this.pose.pitch * .26 + Math.sin(step - .45) * .036 * activity,
       postYaw: -turn * .158 + Math.sin(step - 1.05) * .033 * activity,
       postPitch: .017 - this.pose.pitch * .12 + Math.sin(step - .68) * .026 * activity,
-      gasterYaw: -turn * .197 + Math.sin(step - 1.36) * .041 * activity,
+      gasterYaw: -turn * .197 + Math.sin(step - 1.36) * .041 * activity
+        + (groom?.part === 'abdomen' ? groom.side * .19 * groom.reach : 0),
       gasterPitch: .122 - this.pose.pitch * .29 + Math.cos(step - .85) * .040 * activity,
       gasterRoll: -this.pose.roll * .23 + Math.sin(step - 1.12) * .039 * activity,
     };

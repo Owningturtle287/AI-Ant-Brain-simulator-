@@ -20,15 +20,20 @@ Food and water deliveries trigger different mouthpart motions in the queen. The 
 
 All visible workers use the same articulated anatomy. WebGL draws their shared parts in batches and updates the world tiles when the camera moves between chunks. The compatibility renderer projects the same worker rigs onto a canvas.
 
+The movement solver checks fitted volumes for the head, mouth, thorax, waist, and abdomen. Workers turn around obstructions, sidestep, and raise their stance when a path over a lower neighboring body is available. Leg trajectories and the two antennae check the same surfaces. Feet can plant on an exposed shell, and feelers retract in tight gaps. These fitted volumes approximate the rendered cuticle.
+
 ## Training
 
-Each worker owns a small, trainable action-value policy. Its 66 weights score eleven available tasks using cues for deficit, distance, cargo, and nearby demand. The founder starts with hand-set weights that make basic survival possible. Small exploratory variations sometimes favor a different task. Temporal-difference updates use the rewards from successful deliveries, self-care, scouting, and brood care, with a cost for time spent. This setup learns task priorities while the action repertoire, terrain navigation, and leg mechanics are authored. The default checkpoint score includes survival time, hatchings, deliveries, losses, and the queen's reserves.
+Each worker owns a trainable action-value policy. Its weights score options using cues for deficit, distance, cargo, and nearby demand. The founder starts with hand-set weights that make basic survival possible. Small exploratory variations sometimes favor a different task. Temporal-difference updates use rewards from successful deliveries, self-care, scouting, and brood care, with a cost for time spent. The default checkpoint score includes survival time, hatchings, deliveries, losses, and the queen's reserves.
 
-Each egg gets a snapshot of the most recently matured worker's current weights and a small independent mutation. The first eggs inherit from the founder. Hatching creates an independent worker that continues to learn from its own outcomes. The highest-scoring checkpoint so far is saved in this browser and seeds the next founder. The learned policy and survival outcome depend on the world seed and settings.
+Dirt accumulates separately on eleven areas. Ground contact dirties each leg according to the terrain under that foot, and antenna contact can pick up dirt or wash it away in water. The worker learns which areas to clean and adjusts its reach calibration based on contact and dirt removed. It starts with the ability to reach and wipe those areas using its articulated joints. Saved policies from earlier releases keep their existing weights and use their previous grooming weights to initialize each targeted cleaning action.
+
+Each egg gets a snapshot of the most recently matured worker's current weights and reach calibration with small independent mutations. The first eggs inherit from the founder. Hatching creates an independent worker that continues to learn from its own outcomes. The highest-scoring checkpoint so far is saved in this browser and seeds the next founder. The learned policy and survival outcome depend on the world seed and settings.
 
 ## Controls
 
 - **Nest** centers the queen and nursery. **Worker** follows the current worker. **Explore** lets you pan across the world with two fingers or a right-button drag.
+- Tap or click a worker or the queen to see their own activity and reserves. The worker card also shows age, generation, antenna contact, last cleaned area, and a breakdown of dirt by body part.
 - **Settings** opens the lifecycle, world, training, and worker panels. Change the simulation clock speed from the bottom toolbar. Speed applies to the full model clock, including decay and development.
 - **Training** shows the seed, policy updates, hatchings, care visits, and deliveries. **Start new run** generates a fresh world from the saved checkpoint.
 - **Worker & brain** shows the selected worker's generation, reserves, and reward. The optional 250,000-neuron anatomical viewer runs a separate spiking readout driven by that worker's sensor and movement signals. The regional cell counts and 750,000 individual connections in the anatomy model are estimates.

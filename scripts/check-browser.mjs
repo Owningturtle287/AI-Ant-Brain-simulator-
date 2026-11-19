@@ -25,11 +25,22 @@ try {
   assert.equal(await desktop.locator('#settings-panel').isVisible(), false);
   await desktop.screenshot({ path: 'browser-results/open-world.png' });
   console.log('Desktop world rendered');
+  const crop = await canvas.boundingBox();
+  await canvas.click({ position: { x: crop.width * .506, y: crop.height * .443 } });
+  assert.equal(await desktop.locator('#ant-title').textContent(), 'Queen');
+  assert.ok(await desktop.locator('#ant-inspector').isVisible());
+  await desktop.getByRole('button', { name: 'Close ant details' }).click();
 
   await desktop.getByRole('button', { name: 'Explore', exact: true }).click();
   assert.equal(await desktop.locator('#explore-view').getAttribute('aria-pressed'), 'true');
   await desktop.getByRole('button', { name: 'Worker', exact: true }).click();
   assert.equal(await desktop.locator('#worker-view').getAttribute('aria-pressed'), 'true');
+  await canvas.click({ position: { x: crop.width * .512, y: crop.height * .451 } });
+  assert.match(await desktop.locator('#ant-title').textContent(), /^Worker 1$/);
+  assert.ok(await desktop.locator('#ant-inspector').isVisible());
+  await desktop.locator('#ant-dirt summary').click();
+  assert.equal(await desktop.locator('#dirt-list li:visible').count(), 11);
+  await desktop.getByRole('button', { name: 'Close ant details' }).click();
   await desktop.getByRole('button', { name: 'Settings', exact: true }).click();
   await desktop.locator('#egg-seconds').fill('2');
   await desktop.locator('#egg-seconds').press('Tab');

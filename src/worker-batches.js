@@ -1,4 +1,6 @@
-import { DynamicDrawUsage, InstancedMesh } from 'three';
+import { Color, DynamicDrawUsage, InstancedMesh } from 'three';
+
+const tint = new Color();
 
 export class WorkerBatches {
   constructor(parent) {
@@ -7,7 +9,10 @@ export class WorkerBatches {
   }
 
   reset() {
-    for (const batch of this.groups.values()) batch.matrices.length = 0;
+    for (const batch of this.groups.values()) {
+      batch.matrices.length = 0;
+      batch.grime.length = 0;
+    }
   }
 
   add(root) {
@@ -18,16 +23,18 @@ export class WorkerBatches {
       const key = geometry.id + ':' + material.id;
       let batch = this.groups.get(key);
       if (!batch) {
-        batch = { geometry, material, renderOrder, matrices: [], mesh: null, capacity: 0 };
+        batch = { geometry, material, renderOrder, matrices: [], grime: [], colored: !!part.userData.zone,
+          mesh: null, capacity: 0 };
         this.groups.set(key, batch);
       }
       batch.matrices.push(part.matrixWorld);
+      if (batch.colored) batch.grime.push(part.userData.grime ?? 0);
     });
   }
 
   commit() {
     for (const batch of this.groups.values()) {
-      const { geometry, material, matrices, renderOrder } = batch;
+      const { geometry, material, matrices, renderOrder, grime, colored } = batch;
       if (!matrices.length) {
         if (batch.mesh) batch.mesh.visible = false;
         continue;
@@ -54,6 +61,15 @@ export class WorkerBatches {
       mesh.instanceMatrix.clearUpdateRanges();
       mesh.instanceMatrix.addUpdateRange(0, matrices.length * 16);
       mesh.instanceMatrix.needsUpdate = true;
+      if (colored) {
+        for (let i = 0; i < grime.length; i++) {
+          const dust = grime[i];
+          mesh.setColorAt(i, tint.setRGB(1 - dust * .36, 1 - dust * .44, 1 - dust * .59));
+        }
+        mesh.instanceColor.clearUpdateRanges();
+        mesh.instanceColor.addUpdateRange(0, grime.length * 3);
+        mesh.instanceColor.needsUpdate = true;
+      }
     }
   }
 }

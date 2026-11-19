@@ -166,7 +166,14 @@ export class SoftwareView {
       center.copy(world).applyMatrix4(transform);
       if (Math.abs(center.x) > 1.3 || Math.abs(center.y) > 1.3 || Math.abs(center.z) > 1) return;
       const screen = this.screen(center);
-      const color = mesh.material.color.getHex(SRGBColorSpace);
+      let color = mesh.material.color.getHex(SRGBColorSpace);
+      const dust = mesh.userData.grime;
+      if (dust) {
+        const r = Math.round((color >> 16) * (1 - dust * .23));
+        const g = Math.round(((color >> 8) & 255) * (1 - dust * .29));
+        const b = Math.round((color & 255) * (1 - dust * .42));
+        color = r * 65536 + g * 256 + b;
+      }
       const depth = center.z;
       const distance = camera.position.distanceTo(world);
       const scale = this.height / (2 * Math.tan(camera.fov * Math.PI / 360) * distance);

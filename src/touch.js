@@ -1,3 +1,5 @@
+import { segmentReach } from './body-space.js';
+
 const size = 3;
 const key = (x, z) => `${x}/${z}`;
 const axis = value => Math.floor(value / size);
@@ -25,7 +27,7 @@ export class TouchField {
     this.add(offers(queen, 1.59, map.height(1.59, .2) + 1.18, .20, .54, 'queen'));
     this.add(offers(queen, -1.69, map.height(-1.69, -.2) + .85, -.20, .62, 'queen'));
     for (const worker of workers) {
-      const y = map.height(worker.x, worker.z) + .62;
+      const y = map.height(worker.x, worker.z) + .62 + worker.lift;
       const cos = Math.cos(worker.heading), sin = Math.sin(worker.heading);
       this.add(offers(worker, worker.x + cos * .75, y + .07, worker.z - sin * .75, .29, 'worker'));
       this.add(offers(worker, worker.x, y, worker.z, .23, 'worker'));
@@ -50,10 +52,11 @@ export class TouchField {
     const cos = Math.cos(worker.heading), sin = Math.sin(worker.heading);
     const forwardX = worker.x + cos * 1.24;
     const forwardZ = worker.z - sin * 1.24;
-    const baseY = map.height(worker.x, worker.z) + .72;
+    const baseY = map.height(worker.x, worker.z) + .72 + worker.lift;
     const minX = axis(forwardX - 1.8), maxX = axis(forwardX + 1.8);
     const minZ = axis(forwardZ - 1.8), maxZ = axis(forwardZ + 1.8);
     const patches = map.nearby(forwardX, forwardZ, 2.45);
+    const bodies = colony.space.near(worker, 3.35);
     for (const probe of worker.probes) {
       const side = probe.side;
       const phase = time * 5.3 + (side > 0 ? 1.8 : 0) + worker.id * .41;
@@ -95,6 +98,19 @@ export class TouchField {
         check(map, socketX + .47 * cos + side * .27 * sin, map.height(freeX, freeZ) + .015,
           socketZ - .47 * sin + side * .27 * cos, .025, 'ground');
       }
+      if (picked) {
+        const start = { x: socketX, y: baseY, z: socketZ };
+        let front = null, fraction = 1;
+        for (const entry of bodies) {
+          const reached = segmentReach(entry.lobes, start, picked, .034);
+          if (reached < fraction) { front = entry.body; fraction = reached; }
+        }
+        if (front) {
+          picked = { character: front, kind: front.queen ? 'queen' : 'worker',
+            x: start.x + (picked.x - start.x) * fraction, y: start.y + (picked.y - start.y) * fraction,
+            z: start.z + (picked.z - start.z) * fraction };
+        }
+      }
       if (!picked && !probe.tip) probe.tip = { x: freeX, y: freeY, z: freeZ };
       const target = picked ?? { x: freeX, y: freeY, z: freeZ };
       const tip = probe.tip ?? { x: freeX, y: freeY, z: freeZ };
@@ -107,7 +123,7 @@ export class TouchField {
       probe.aim = picked ? tip : null;
       if (picked && Math.hypot(tip.x - target.x, tip.y - target.y, tip.z - target.z) < .17) {
         if (probe.target !== picked.character || time - probe.sentAt > .70) {
-          colony.receiveTouch(worker, picked.character, picked.kind);
+          colony.receiveTouch(worker, picked.character, picked.kind, side);
           probe.sentAt = time;
         }
         probe.observedAt = time;

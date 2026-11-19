@@ -91,6 +91,18 @@ select { font-size: 13px; padding: 0 6px; }
 .drawer-top { display: flex; align-items: center; justify-content: space-between; gap: 7px; padding: 7px 9px 7px 14px; }
 .drawer-top h2 { font-size: 18px; font-weight: 690; letter-spacing: -.025em; }
 .drawer-top button { background: #282f23; }
+.ant-inspector { position: absolute; right: max(14px, env(safe-area-inset-right)); bottom: calc(max(12px, env(safe-area-inset-bottom)) + 62px);
+  width: min(308px, calc(100vw - 26px)); max-height: min(65dvh, 540px); overflow: auto; overscroll-behavior: contain;
+  border: 1px solid var(--line); border-radius: 13px; background: var(--panel); box-shadow: 0 11px 40px #1a140e94; }
+.ant-inspector .drawer-top p { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.ant-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 4px 13px 12px; font-size: 12px; }
+.ant-metrics dt { color: var(--muted); font-size: 11px; }
+.ant-metrics dd { margin-top: 3px; font-variant-numeric: tabular-nums; }
+.dirt-list { list-style: none; display: grid; gap: 6px; margin: 0; padding: 0 13px 12px; font-size: 12px; }
+.dirt-list li { display: grid; grid-template-columns: 1fr 58px 31px; align-items: center; gap: 6px; }
+.dirt-list progress { margin: 0; }
+.dirt-list strong { font-variant-numeric: tabular-nums; text-align: right; font-size: 11px; }
+.ant-actions { border-top: 1px solid var(--line); display: flex; justify-content: end; gap: 5px; padding: 6px; }
 details { border-top: 1px solid var(--line); }
 summary { cursor: pointer; min-height: 44px; padding: 12px 14px; font-size: 13px; font-weight: 670; color: #e8dcc8; }
 details[open] > summary { color: #ffd3a9; }
@@ -120,6 +132,7 @@ details[open] > summary { color: #ffd3a9; }
   .control-group { gap: 0; }
   .camera-tools button { padding: 0 7px; font-size: 12px; }
   .drawer { right: max(8px, env(safe-area-inset-right)); width: min(338px, calc(100vw - 16px)); }
+  .ant-inspector { right: max(8px, env(safe-area-inset-right)); width: min(290px, calc(100vw - 16px)); }
 }
 @media (max-width: 355px) {
   time { display: none; }

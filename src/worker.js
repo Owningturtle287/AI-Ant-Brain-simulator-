@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { terrainHeight } from './motion.js';
 import { anatomy, sculpt } from './sculpt.js';
+import { segmentBlocked, segmentReach, shellRoof } from './body-space.js';
 
 const up = new THREE.Vector3(0, 1, 0);
 const axis = new THREE.Vector3(1, 0, 0);
@@ -133,6 +134,8 @@ const feelPole = new THREE.Vector3();
 const feelElbow = new THREE.Vector3();
 const feelOuter = new THREE.Vector3();
 const reverseFeeler = new THREE.Quaternion();
+const feelBase = new THREE.Vector3(), feelMiddle = new THREE.Vector3(), feelTip = new THREE.Vector3();
+const alternateFeel = new THREE.Vector3(), contactAim = new THREE.Vector3();
 
 // Sample the actual shell instead of distributing hairs inside a bounding sphere.
 function hairGeometry(shell, count, length, seed, onLimb = false) {
@@ -242,6 +245,11 @@ const upperPole = new THREE.Vector3(), sidePole = new THREE.Vector3(), desiredPo
 const poleCross = new THREE.Vector3();
 const transport = new THREE.Quaternion();
 const angle = new THREE.Euler(0, 0, 0, 'YXZ');
+const restToe = new THREE.Vector3(), safeToe = new THREE.Vector3();
+const standardKnee = new THREE.Vector3(), jointAxis = new THREE.Vector3();
+const cleaningPoint = new THREE.Vector3(), idealAnkle = new THREE.Vector3();
+const stepsAround = [[0, 0], [0, .19], [.24, -.18], [-.25, -.19], [0, -.44], [.38, .02], [-.40, .04], [0, -.65]];
+const kneeTurns = [0, .34, -.34, .68, -.68, 1.04, -1.04, 1.52, -1.52, 2.02, -2.02, Math.PI];
 
 function poseLink(part, start, end, thickness, width = 1, twist = 0) {
   aim.subVectors(end, start);
@@ -295,11 +303,11 @@ export class WorkerRig {
     const m = this.material;
     this.root = group(scene);
     this.body = group(this.root);
-    this.addShell(this.body, 'mesosoma', m.mesosoma, 26, 52, 152, .039, 45);
+    this.addShell(this.body, 'mesosoma', m.mesosoma, 26, 52, 152, .039, 45).userData.zone = 'thorax';
 
     this.head = group(this.body, .585, .124);
     mesh(this.head, shellGeometry('neck', 14, 18, compact), m.hinge).position.set(-.047, -.043, 0);
-    this.addShell(this.head, 'head', m.head, 34, 54, 203, .039, 63);
+    this.addShell(this.head, 'head', m.head, 34, 54, 203, .039, 63).userData.zone = 'head';
     this.headSamples = [.25, .43, .58, .70, .76].flatMap(x =>
       [Math.PI - .60, Math.PI, Math.PI + .60].map(angle => anatomy.head.surface(x, angle)));
     this.headSamples.push(new THREE.Vector3(.89, -.287, 0));
@@ -328,7 +336,7 @@ export class WorkerRig {
     this.postWaist = group(this.waist, -.226, -.006);
     this.addShell(this.postWaist, 'postpetiole', m.waist, 22, 28, 34, .031, 76);
     this.gaster = group(this.postWaist, -.198, -.002);
-    this.addShell(this.gaster, 'gaster', m.gaster, 32, 60, 169, .039, 84);
+    this.addShell(this.gaster, 'gaster', m.gaster, 32, 60, 169, .039, 84).userData.zone = 'abdomen';
     this.gasterSamples = [-.30, -.47, -.59, -.73, -.88, -.976].flatMap(x =>
       [Math.PI - .61, Math.PI, Math.PI + .61].map(angle => anatomy.gaster.surface(x, angle)));
     this.clearancePoint = new THREE.Vector3();
@@ -346,7 +354,7 @@ export class WorkerRig {
     const hairs = compact ? [] : sockets.slice(2, 4).map((shape, index) =>
       reuseGeometry(`leg-hair/${index}`, () => hairGeometry(shape, index ? 24 : 13, index ? .46 : .32, 95 + index, true)));
     const claws = compact ? [] : [-1, 1].map(side => reuseGeometry(`claw/${side}`, () => terminalClaw(side)));
-    this.legs = legs.map(() => {
+    this.legs = legs.map(({ type, side }) => {
       const segments = [
         mesh(this.root, sockets[0], m.hinge), mesh(this.root, sockets[1], m.hinge),
         mesh(this.root, sockets[2], m.femur), mesh(this.root, sockets[3], m.tibia),
@@ -354,6 +362,8 @@ export class WorkerRig {
       ];
       for (const [index, geometry] of hairs.entries()) segments[index + 2].add(new THREE.Mesh(geometry, m.setae));
       const foot = group(this.root);
+      const zone = (side < 0 ? 'left' : 'right') + type.name;
+      for (const part of segments) part.userData.zone = zone;
       for (const geometry of claws) mesh(foot, geometry, m.claw);
       const markers = Array.from({ length: 5 }, () => this.marker(this.markerGroup, .032));
       const contact = new THREE.Mesh(footRing, m.feetMarker);
@@ -367,6 +377,8 @@ export class WorkerRig {
       ...this.jaws.map(jaw => this.marker(jaw, .029)),
       ...this.antennae.flatMap(a => [this.marker(a.pieces[0], .028), this.marker(a.pieces[1], .024)]),
     ];
+    this.stained = [];
+    this.root.traverse(part => { if (part.userData.zone) this.stained.push(part); });
   }
 
   addShell(parent, name, material, radial, axial, hairCount, length, seed) {
@@ -387,11 +399,14 @@ export class WorkerRig {
     conicalSocket.position.x = -.036;
     conicalSocket.scale.set(.078, .049, .049);
     const pieces = [];
+    const skins = [];
     let pivot = base;
     for (const [index, length] of antennaLengths.entries()) {
       const shape = index === 0 ? 0 : index === 8 ? 2 : index === 9 ? 3 : 1;
       const thickness = index === 0 ? .041 : index === 8 ? .035 : index === 9 ? .043 : .030;
       const part = mesh(pivot, shapes[shape], index >= 8 ? this.material.club : this.material.antenna);
+      part.userData.zone = side < 0 ? 'leftAntenna' : 'rightAntenna';
+      skins.push(part);
       part.scale.set(length * 1.02, thickness, thickness * .87);
       if (!this.compact && (index === 0 || index >= 8)) {
         part.add(new THREE.Mesh(reuseGeometry(`antenna-hair/${index}`,
@@ -400,7 +415,7 @@ export class WorkerRig {
       pieces.push(pivot);
       pivot = group(pivot, length, 0, 0);
     }
-    return { side, pieces };
+    return { side, pieces, skins, tip: pivot };
   }
 
   marker(parent, size) {
@@ -409,6 +424,10 @@ export class WorkerRig {
     marker.renderOrder = 8;
     parent.add(marker);
     return marker;
+  }
+
+  setGrime(grime) {
+    for (const part of this.stained) part.userData.grime = grime[part.userData.zone];
   }
 
   update(motion, showJoints, showContacts, stingExtension = 0, acting = null) {
@@ -438,7 +457,14 @@ export class WorkerRig {
       const side = index === 0 ? -1 : 1;
       hinge.rotation.y = -side * (.03 + .07 * (.5 + .5 * Math.sin(time * 2.2)) ** 5 + (acting?.jaw ?? 0));
     }
-    for (const [index, { side, pieces }] of this.antennae.entries()) {
+    for (const [index, antenna] of this.antennae.entries()) {
+      const { side, pieces, skins, tip } = antenna;
+      for (const [part, length] of antennaLengths.entries()) {
+        const next = pieces[part + 1] ?? tip;
+        next.position.x = length;
+        skins[part].visible = true;
+        skins[part].scale.x = length * 1.02;
+      }
       const sweep = Math.sin(time * 5.8 + (side === -1 ? 0 : 1.6));
       pieces[0].rotation.set(0, -side * (.69 + .22 * sweep), .83 + .11 * Math.sin(time * 3.8 + side));
       pieces[1].rotation.set(0, side * (.07 + .21 * sweep), -1.29 + .12 * Math.sin(time * 5.1 + side));
@@ -446,8 +472,14 @@ export class WorkerRig {
         pieces[index].rotation.z = -.043 + Math.sin(time * 5.9 - index * .32 + side) * .037;
         pieces[index].rotation.y = side * (.016 + Math.sin(time * 3.7 - index * .17) * .023);
       }
-      const target = acting?.probes?.[index]?.aim;
+      let target = acting?.probes?.[index]?.aim;
+      const groom = acting?.groom;
+      if (groom?.kind === 'antenna' && Math.sign(groom.z) === side && groom.reach > .12) {
+        this.body.localToWorld(contactAim.set(groom.x, groom.y - .675, groom.z));
+        target = contactAim;
+      }
       if (target) this.aimAntenna(pieces, side, target, time);
+      if (acting?.antennaObstacles?.length) this.guardAntenna(antenna, acting.antennaObstacles, time);
     }
 
     this.markerGroup.visible = showJoints;
@@ -457,7 +489,41 @@ export class WorkerRig {
     bodyForward.copy(axis).applyQuaternion(this.body.quaternion);
     bodyOutward.set(0, 0, 1).applyQuaternion(this.body.quaternion);
     bodyUp.copy(up).applyQuaternion(this.body.quaternion);
-    for (const [index, leg] of motion.legs.entries()) this.poseLeg(this.legs[index], leg, dt);
+    for (const [index, leg] of motion.legs.entries()) {
+      this.poseLeg(this.legs[index], leg, dt, acting?.obstacles, acting?.groom?.leg === index ? acting.groom : null);
+    }
+  }
+
+  guardAntenna({ side, pieces, skins, tip }, obstacles, time) {
+    const safe = () => {
+      pieces[0].getWorldPosition(feelBase);
+      pieces[1].getWorldPosition(feelMiddle);
+      tip.getWorldPosition(feelTip);
+      return !segmentBlocked(obstacles, feelBase, feelMiddle, .026) &&
+        !segmentBlocked(obstacles, feelMiddle, feelTip, .044);
+    };
+    if (safe()) return;
+    const reach = segmentReach(obstacles, feelBase, feelTip, .045);
+    alternateFeel.copy(feelBase).lerp(feelTip, Math.max(.23, reach * .93));
+    this.aimAntenna(pieces, side, alternateFeel, time);
+    if (safe()) return;
+    for (const [x, y, z] of [[.39, .59, .57], [.12, .76, .44], [.37, .36, -.33], [-.29, .56, .35], [-.20, .41, -.33]]) {
+      this.head.localToWorld(alternateFeel.set(x, y, z * side));
+      this.aimAntenna(pieces, side, alternateFeel, time);
+      if (safe()) return;
+    }
+    // In a packed gap, retract the articulated tip at its first obstruction.
+    for (const [index, part] of pieces.entries()) {
+      const next = pieces[index + 1] ?? tip;
+      part.getWorldPosition(feelBase);
+      next.getWorldPosition(feelTip);
+      const fraction = segmentReach(obstacles, feelBase, feelTip, .034);
+      if (fraction > .995) continue;
+      skins[index].scale.x = antennaLengths[index] * Math.max(0, fraction - .035);
+      skins[index].visible = fraction > .07;
+      for (let rear = index + 1; rear < pieces.length; rear++) skins[rear].visible = false;
+      break;
+    }
   }
 
   aimAntenna(pieces, side, target, time) {
@@ -528,10 +594,15 @@ export class WorkerRig {
     if (this.sting.visible) this.gasterSamples.pop();
   }
 
-  poseLeg(rig, leg, dt) {
+  poseLeg(rig, leg, dt, obstacles, groom) {
     const { type, side } = leg;
     hip.set(type.x, type.y, side * type.socket).applyQuaternion(this.body.quaternion).add(this.body.position);
     toe.set(leg.x, leg.y, leg.z);
+    if (groom?.reach > 0) {
+      cleaningPoint.set(groom.x, groom.y - .675, groom.z).applyQuaternion(this.body.quaternion).add(this.body.position);
+      toe.lerp(cleaningPoint, groom.reach);
+      toe.y += Math.sin(Math.PI * groom.reach) * .14;
+    }
     const swing = Math.sin(Math.PI * leg.swingProgress);
     const foreAft = THREE.MathUtils.clamp((toe.x - hip.x) * forward.x + (toe.z - hip.z) * forward.z, -.85, .85);
     coxa.copy(hip).addScaledVector(bodyOutward, side * .062)
@@ -546,8 +617,10 @@ export class WorkerRig {
     ankle.copy(toeBase).addScaledVector(footDirection, -type.foot * (.70 - swing * .14));
     ankle.y += type.foot * (.47 + swing * .16);
     solveKnee(femurBase, ankle, knee, rig, leg, swing, dt);
+    if (obstacles?.length) this.clearLeg(obstacles, rig, leg, swing, dt);
 
     const { segments } = rig;
+    for (const segment of segments) segment.visible = true;
     poseLink(segments[0], hip, coxa, .069, .98, .2 * side);
     poseLink(segments[1], coxa, femurBase, .043, .91);
     poseLink(segments[2], femurBase, knee, .064 + .009 * (type.x < 0), .92, .27 * side);
@@ -562,6 +635,16 @@ export class WorkerRig {
     rig.foot.position.copy(toeBase);
     rig.foot.quaternion.setFromUnitVectors(axis, footDirection);
     rig.foot.rotateZ(-swing * .34);
+    rig.foot.visible = true;
+    if (obstacles?.length) {
+      let clear = true;
+      for (const segment of segments) {
+        pieceStart.copy(axis).applyQuaternion(segment.quaternion).multiplyScalar(segment.scale.x).add(segment.position);
+        clear &&= !segmentBlocked(obstacles, segment.position, pieceStart, segment.scale.y * .80);
+        segment.visible = clear;
+      }
+      rig.foot.visible = clear;
+    }
     if (this.markerGroup.visible) {
       for (const [index, point] of [hip, femurBase, knee, ankle, toe].entries()) {
         rig.markers[index].position.copy(point);
@@ -571,5 +654,34 @@ export class WorkerRig {
       rig.contact.visible = !leg.swinging;
       rig.contact.position.set(toe.x, toe.y + .004, toe.z);
     }
+  }
+
+  clearLeg(obstacles, rig, leg, swing, dt) {
+    const safe = () => !segmentBlocked(obstacles, coxa, femurBase, .044) &&
+      !segmentBlocked(obstacles, femurBase, knee, .064) && !segmentBlocked(obstacles, knee, ankle, .054) &&
+      !segmentBlocked(obstacles, ankle, toeBase, .034);
+    if (safe()) return;
+    restToe.copy(toe);
+    idealAnkle.copy(ankle);
+    for (const [ahead, spread] of stepsAround) {
+      safeToe.copy(restToe).addScaledVector(bodyForward, ahead).addScaledVector(bodyOutward, spread * leg.side);
+      for (const shell of obstacles) safeToe.y = Math.max(safeToe.y, shellRoof(shell, safeToe.x, safeToe.z, .037) + .022);
+      toeBase.copy(safeToe).addScaledVector(footDirection, -.035);
+      ankle.copy(toeBase).addScaledVector(footDirection, -leg.type.foot * (.70 - swing * .14));
+      ankle.y += leg.type.foot * (.47 + swing * .16);
+      if (femurBase.distanceTo(ankle) > leg.type.upper + leg.type.lower + .045) continue;
+      solveKnee(femurBase, ankle, knee, rig, leg, swing, dt);
+      standardKnee.subVectors(knee, femurBase);
+      jointAxis.subVectors(ankle, femurBase).normalize();
+      for (const turn of kneeTurns) {
+        knee.copy(standardKnee).applyAxisAngle(jointAxis, turn).add(femurBase);
+        if (!safe()) continue;
+        toe.copy(safeToe);
+        return;
+      }
+    }
+    ankle.copy(idealAnkle);
+    toeBase.copy(restToe).addScaledVector(footDirection, -.035);
+    solveKnee(femurBase, ankle, knee, rig, leg, 0, dt);
   }
 }

@@ -1,3 +1,5 @@
+import { groomingActions } from './grooming.js';
+
 const actions = [
   ['eat', 'Eating', [-1.3, 3.3, 2.8, .72, .15, 0]],
   ['drink', 'Drinking', [-1.3, 3.3, 2.8, .72, .15, 0]],
@@ -11,6 +13,10 @@ const actions = [
   ['peerFood', 'Sharing food', [-2.45, 2.43, 2.33, .55, .15, .10]],
   ['peerWater', 'Sharing water', [-2.45, 2.43, 2.33, .55, .15, .10]],
 ];
+const legacyWeights = actions.length * actions[0][2].length;
+for (const { action } of groomingActions) {
+  actions.push([action, 'Grooming', [-1.15, 2.95, 2.27, .57, .4, .11]]);
+}
 export const taskNames = Object.fromEntries(actions.map(([key, label]) => [key, label]));
 const width = actions[0][2].length;
 export const policyWeightCount = width * actions.length;
@@ -19,10 +25,22 @@ const indexOf = Object.fromEntries(actions.map(([key], i) => [key, i]));
 
 export function inheritPolicy(parent, mutation, random) {
   const weights = parent?.length === policyWeightCount ? Float32Array.from(parent) : baseline.slice();
+  if (parent?.length === legacyWeights) {
+    weights.set(parent);
+    const old = indexOf.groom * width;
+    for (const { action } of groomingActions) {
+      weights.set(Array.from(parent).slice(old, old + width), indexOf[action] * width);
+    }
+  }
   for (let i = 0; i < weights.length; i++) {
     if (mutation) weights[i] = Math.max(-7, Math.min(7, weights[i] + (random() - random()) * mutation));
   }
   return weights;
+}
+
+export function acceptsPolicy(weights) {
+  return Array.isArray(weights) && [policyWeightCount, legacyWeights].includes(weights.length) &&
+    weights.every(Number.isFinite);
 }
 
 function value(weights, action, features) {

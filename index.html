@@ -56,6 +56,29 @@
       </div>
     </nav>
 
+    <aside id="ant-inspector" class="ant-inspector" aria-labelledby="ant-title" hidden>
+      <div class="drawer-top">
+        <div><h2 id="ant-title">Worker</h2><p id="ant-activity"></p></div>
+        <button id="close-ant" class="icon" type="button" aria-label="Close ant details"><i data-icon="close"></i></button>
+      </div>
+      <dl class="ant-metrics">
+        <div><dt>Food</dt><dd id="ant-food">—</dd></div>
+        <div><dt>Water</dt><dd id="ant-water">—</dd></div>
+        <div><dt>Age</dt><dd id="ant-age">—</dd></div>
+        <div><dt id="ant-generation-label">Generation</dt><dd id="ant-generation">—</dd></div>
+        <div><dt id="ant-contact-label">Last contact</dt><dd id="ant-contact">—</dd></div>
+        <div><dt id="ant-groomed-label">Last cleaned</dt><dd id="ant-groomed">—</dd></div>
+      </dl>
+      <details id="ant-dirt">
+        <summary>Body dirt</summary>
+        <ul class="dirt-list" id="dirt-list"></ul>
+      </details>
+      <div class="ant-actions">
+        <button type="button" id="follow-ant">Follow worker</button>
+        <button type="button" id="open-ant-brain">Brain details</button>
+      </div>
+    </aside>
+
     <aside id="settings-panel" class="drawer" aria-label="Colony settings" hidden>
       <div class="drawer-top">
         <h2>Colony settings</h2>
@@ -87,7 +110,7 @@
           <label for="joints">Worker joint markers</label><input type="checkbox" id="joints" data-visual="joints">
           <label for="contacts">Worker foot contacts</label><input type="checkbox" id="contacts" data-visual="contacts">
           <label for="sting">Extend worker sting</label><input type="checkbox" id="sting" data-visual="sting">
-          <p class="hint">Drag to orbit. In Explore, use two fingers or right-drag to pan. Gold piles are food. Blue pools are water.</p>
+          <p class="hint">Tap an ant to inspect it. Drag to orbit. In Explore, use two fingers or right-drag to pan. Gold piles are food. Blue pools are water.</p>
         </div>
       </details>
       <details id="training-details">
