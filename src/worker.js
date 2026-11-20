@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { antennaLengths, antennaRotation } from './lab-antenna.js';
 import { terrainHeight } from './motion.js';
 import { anatomy, sculpt } from './sculpt.js';
 import { segmentBlocked, segmentReach, shellRoof } from './body-space.js';
@@ -7,7 +8,6 @@ const up = new THREE.Vector3(0, 1, 0);
 const axis = new THREE.Vector3(1, 0, 0);
 const markerGeometry = new THREE.SphereGeometry(1, 12, 8);
 const footRing = new THREE.RingGeometry(.049, .061, 20);
-const antennaLengths = [.485, .089, .061, .059, .055, .055, .056, .060, .094, .137];
 const feelerReach = antennaLengths.slice(1).reduce((total, length) => total + length, 0);
 const tarsalEnds = [.37, .56, .72, .86, 1];
 const sharedGeometry = new Map();
@@ -452,10 +452,11 @@ export class WorkerRig {
       THREE.MathUtils.lerp(-.169, -.230, stingExtension), 0);
     this.sting.rotation.z = .065 * stingExtension;
     this.sting.visible = stingExtension > .24;
-    this.clearBody(motion.terrain);
+    const manual = acting?.manual;
+    if (!manual) this.clearBody(motion.terrain);
     for (const [index, hinge] of this.jaws.entries()) {
       const side = index === 0 ? -1 : 1;
-      hinge.rotation.y = -side * (.03 + .07 * (.5 + .5 * Math.sin(time * 2.2)) ** 5 + (acting?.jaw ?? 0));
+      hinge.rotation.y = -side * (.03 + (manual ? manual.jaw : .07 * (.5 + .5 * Math.sin(time * 2.2)) ** 5 + (acting?.jaw ?? 0)));
     }
     for (const [index, antenna] of this.antennae.entries()) {
       const { side, pieces, skins, tip } = antenna;
@@ -472,6 +473,10 @@ export class WorkerRig {
         pieces[index].rotation.z = -.043 + Math.sin(time * 5.9 - index * .32 + side) * .037;
         pieces[index].rotation.y = side * (.016 + Math.sin(time * 3.7 - index * .17) * .023);
       }
+      if (manual) {
+        const input = manual.antennae[index];
+        for (const [j, piece] of pieces.entries()) piece.rotation.set(...antennaRotation(side, input, j));
+      }
       let target = acting?.probes?.[index]?.aim;
       const groom = acting?.groom;
       if (groom?.kind === 'antenna' && Math.sign(groom.z) === side && groom.reach > .12) {
@@ -479,7 +484,7 @@ export class WorkerRig {
         target = contactAim;
       }
       if (target) this.aimAntenna(pieces, side, target, time);
-      if (acting?.antennaObstacles?.length) this.guardAntenna(antenna, acting.antennaObstacles, time);
+      if (acting?.antennaObstacles?.length) this.guardAntenna(antenna, acting.antennaObstacles, time, !manual);
     }
 
     this.markerGroup.visible = showJoints;
@@ -490,11 +495,15 @@ export class WorkerRig {
     bodyOutward.set(0, 0, 1).applyQuaternion(this.body.quaternion);
     bodyUp.copy(up).applyQuaternion(this.body.quaternion);
     for (const [index, leg] of motion.legs.entries()) {
+      if (manual && leg.points.length) {
+        this.poseDirectLeg(this.legs[index], leg, acting.obstacles);
+        continue;
+      }
       this.poseLeg(this.legs[index], leg, dt, acting?.obstacles, acting?.groom?.leg === index ? acting.groom : null);
     }
   }
 
-  guardAntenna({ side, pieces, skins, tip }, obstacles, time) {
+  guardAntenna({ side, pieces, skins, tip }, obstacles, time, seekClearance) {
     const safe = () => {
       pieces[0].getWorldPosition(feelBase);
       pieces[1].getWorldPosition(feelMiddle);
@@ -503,27 +512,30 @@ export class WorkerRig {
         !segmentBlocked(obstacles, feelMiddle, feelTip, .044);
     };
     if (safe()) return;
-    const reach = segmentReach(obstacles, feelBase, feelTip, .045);
-    alternateFeel.copy(feelBase).lerp(feelTip, Math.max(.23, reach * .93));
-    this.aimAntenna(pieces, side, alternateFeel, time);
-    if (safe()) return;
-    for (const [x, y, z] of [[.39, .59, .57], [.12, .76, .44], [.37, .36, -.33], [-.29, .56, .35], [-.20, .41, -.33]]) {
-      this.head.localToWorld(alternateFeel.set(x, y, z * side));
-      this.aimAntenna(pieces, side, alternateFeel, time);
-      if (safe()) return;
-    }
+    if (seekClearance && this.bypassAntenna(side, pieces, obstacles, safe, time)) return;
     // In a packed gap, retract the articulated tip at its first obstruction.
     for (const [index, part] of pieces.entries()) {
       const next = pieces[index + 1] ?? tip;
       part.getWorldPosition(feelBase);
       next.getWorldPosition(feelTip);
       const fraction = segmentReach(obstacles, feelBase, feelTip, .034);
-      if (fraction > .995) continue;
-      skins[index].scale.x = antennaLengths[index] * Math.max(0, fraction - .035);
-      skins[index].visible = fraction > .07;
-      for (let rear = index + 1; rear < pieces.length; rear++) skins[rear].visible = false;
-      break;
+      next.position.x = antennaLengths[index] * fraction;
+      skins[index].visible = fraction > .055;
+      skins[index].scale.x = next.position.x;
     }
+  }
+
+  bypassAntenna(side, pieces, obstacles, safe, time) {
+    const reach = segmentReach(obstacles, feelBase, feelTip, .045);
+    alternateFeel.copy(feelBase).lerp(feelTip, Math.max(.23, reach * .93));
+    this.aimAntenna(pieces, side, alternateFeel, time);
+    if (safe()) return true;
+    for (const [x, y, z] of [[.39, .59, .57], [.12, .76, .44], [.37, .36, -.33], [-.29, .56, .35], [-.20, .41, -.33]]) {
+      this.head.localToWorld(alternateFeel.set(x, y, z * side));
+      this.aimAntenna(pieces, side, alternateFeel, time);
+      if (safe()) return true;
+    }
+    return false;
   }
 
   aimAntenna(pieces, side, target, time) {
@@ -592,6 +604,30 @@ export class WorkerRig {
     const front = this.groundRisk(this.head, this.headSamples, terrain);
     this.body.position.y += Math.min(.13, Math.max(rear.height, front.height));
     if (this.sting.visible) this.gasterSamples.pop();
+  }
+
+  poseDirectLeg(rig, leg, obstacles) {
+    const thicknesses = [.069, .043, .064, .054, .033, .029, .025, .021, .017];
+    let clear = true;
+    for (const [index, segment] of rig.segments.entries()) {
+      const a = pieceStart.copy(leg.points[index]), b = pieceEnd.copy(leg.points[index + 1]);
+      const thickness = thicknesses[index];
+      poseLink(segment, a, b, thickness, .91);
+      clear &&= !obstacles?.length || !segmentBlocked(obstacles, a, b, thickness * .78);
+      segment.visible = clear;
+    }
+    const tip = leg.points.at(-1), last = leg.points.at(-2);
+    rig.foot.position.copy(tip);
+    aim.copy(tip).sub(last).normalize();
+    rig.foot.quaternion.setFromUnitVectors(axis, aim);
+    rig.foot.visible = clear;
+    if (this.contacts.visible) {
+      rig.contact.visible = leg.ground;
+      rig.contact.position.copy(tip);
+    }
+    if (this.markerGroup.visible) {
+      for (const [index, point] of [0, 2, 3, 4, 9].entries()) rig.markers[index].position.copy(leg.points[point]);
+    }
   }
 
   poseLeg(rig, leg, dt, obstacles, groom) {

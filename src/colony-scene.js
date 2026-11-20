@@ -171,6 +171,7 @@ export class ColonyScene {
     for (const entry of this.detailed) entry.id = null;
     this.queenMotion.terrain = world.height;
     this.tileWindow = '';
+    this.resourceVersion = world.resourceVersion;
     this.queenActing.reset();
     this.queenMotion.reset(0, 0, queenHeading);
     this.queen.update(this.queenMotion, false, false);
@@ -220,8 +221,7 @@ export class ColonyScene {
     const group = new THREE.Group();
     tile.group.add(group);
     tile.props = group;
-    const patches = chunk.resources.map(patch => makePatch(patch, this.world));
-    for (const { group: visual } of patches) group.add(visual);
+    this.syncPatches(tile, chunk);
     const random = seeded(chunk.seed);
     const scatter = new THREE.InstancedMesh(grit, materials.rock, chunk.stones.length);
     const transform = new THREE.Object3D();
@@ -245,8 +245,22 @@ export class ColonyScene {
         leaf.rotation.x = random() * .48;
       }
     }
-    tile.patches = patches;
     tile.scatter = scatter;
+  }
+
+  syncPatches(tile, chunk) {
+    const active = new Map(tile.patches.map(visual => [visual.patch, visual]));
+    tile.patches = chunk.resources.map(patch => {
+      const existing = active.get(patch);
+      if (existing) {
+        active.delete(patch);
+        return existing;
+      }
+      const visual = makePatch(patch, this.world);
+      tile.props.add(visual.group);
+      return visual;
+    });
+    for (const { group } of active.values()) tile.props.remove(group);
   }
 
   update(colony, target, selected, dt, flags, alpha, camera, visualDt) {
@@ -254,7 +268,10 @@ export class ColonyScene {
     camera.updateMatrixWorld();
     cameraTransform.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     inView.setFromProjectionMatrix(cameraTransform);
+    const resourcesMoved = this.resourceVersion !== this.world.resourceVersion;
+    this.resourceVersion = this.world.resourceVersion;
     for (const tile of this.tiles.values()) {
+      if (resourcesMoved && tile.props) this.syncPatches(tile, this.world.chunk(tile.x, tile.z));
       for (const visual of tile.patches) {
         const { patch, group } = visual;
         if (patch.units < 1) colony.map.refill(patch, colony.time);
@@ -262,10 +279,11 @@ export class ColonyScene {
         else if (group.visible && patch.units < 1) group.visible = false;
       }
     }
+    this.nest.visible = !colony.mode;
     this.queenPivot.visible = colony.queen.living;
     this.visualShells.clear();
     for (const worker of colony.workers) {
-      const previous = worker.previous;
+      const previous = worker.body ? worker : worker.previous;
       const x = THREE.MathUtils.lerp(previous.x, worker.x, alpha);
       const z = THREE.MathUtils.lerp(previous.z, worker.z, alpha);
       const heading = THREE.MathUtils.lerp(previous.heading, worker.heading, alpha);
@@ -375,15 +393,18 @@ export class ColonyScene {
       rig.root.visible = true;
       const pose = this.visualShells.get(worker);
       const groom = worker.grooming ? groomPose(worker.grooming, colony.time) : null;
-      if (dt > 0) {
+      if (!worker.body && dt > 0) {
         motion.follow(Math.min(dt, .11), {
           ...pose, speed: worker.speed, turn: worker.turn, state: worker.state, looking: worker.looking, groom,
         });
       }
       const obstacles = this.obstacles(colony, worker);
-      rig.update(motion, flags.joints && selected === worker, flags.contacts && selected === worker,
+      const direct = worker.body;
+      const rigMotion = direct ? { x: pose.x, z: pose.z, heading: pose.heading, clock: direct.clock, legs: direct.legs,
+        joints: direct.joints, bodyPose: () => direct, terrain: this.world.height } : motion;
+      rig.update(rigMotion, flags.joints && selected === worker, flags.contacts && selected === worker,
         flags.sting && selected === worker ? 1 : 0, { probes: groom ? null : worker.probes, obstacles,
-          antennaObstacles: obstacles, groom });
+          antennaObstacles: obstacles, groom, manual: direct });
       rig.setGrime(worker.grime);
       cargo.visible = !!worker.cargo;
       cargo.material = worker.cargo === 'water' ? materials.water : materials.crumb;

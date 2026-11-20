@@ -1,8 +1,26 @@
 # Fire Ant Lab
 
-AI Ant Brain Simulator · Colony training
+AI Ant Brain Simulator
 
-Fire Ant Lab is a mobile-first 3D colony simulation inspired by the red imported fire ant (*Solenopsis invicta*). Each run starts with one stationary queen and one adult worker. The open world streams seeded terrain with scattered food and water. Workers discover nearby patches, share those locations and their needs, and choose among scouting, eating, drinking, nursing brood, supplying the colony, grooming, and resting.
+Fire Ant Lab is a mobile-first 3D simulation inspired by the red imported fire ant (*Solenopsis invicta*). The startup menu offers three habitats. Use **Modes** to move between them during a session.
+
+| Mode | Starting habitat |
+| --- | --- |
+| Colony | A queen, one worker, and procedurally scattered food and water |
+| Individual | One untrained ant and starter food and water |
+| From Scratch | Empty terrain. Place your own food, water, and ants |
+
+## From Scratch
+
+Open **Training tools → Build the habitat**, choose the resource or ants and a quantity, then tap terrain to place them. The sandbox supports up to 120 live ants. Tap any ant or select it from the training panel to inspect its condition and save its current policy. Saved weights can be assigned to subsequent spawns, downloaded as JSON, or imported on another device. The weight bank persists on the device. Habitat state is retained while changing modes in the open app.
+
+A fresh policy has 414 zero-initialized coefficients. Shared timing and local senses provide inputs to independent joint drives, including leg hinges, neck, waist, abdomen and antennae. Translation and turning come from changes in grounded feet, with passive compliance and fitted body contacts. Motor trials retain weight changes that improve movement and resource outcomes. Mouth, sharing, and signal outputs learn from their individual outcomes. The contact model is lightweight, and the joint bounds use comparative ant anatomy instead of species-specific limit measurements. [Comparative joint model for *Messor barbarus*](https://pmc.ncbi.nlm.nih.gov/articles/PMC8921731/)
+
+Enable reproduction under **Learning & reproduction**. Nearby parents can reproduce once both have at least 75% of both reserves and are past the 28-simulated-second cooldown. Every offspring receives exactly half its starting coefficients from each parent, without an additional mutation at birth. This is simulated policy inheritance and uses the same ant body for both parents and the offspring.
+
+## Colony
+
+Each colony run starts with one stationary queen and one adult worker. The open world streams seeded terrain with scattered food and water. Workers discover nearby patches, share those locations and their needs, and choose among scouting, eating, drinking, nursing brood, supplying the colony, grooming, and resting.
 
 | Setting | Default |
 | --- | ---: |

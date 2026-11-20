@@ -55,14 +55,24 @@ export function bodyShells(body, ground, x = body.x, z = body.z, heading = body.
     const rear = body.queen && lobe.part === 'gaster';
     const offset = scale * (rear ? -1.024 + (lobe.x + 1.024) * 1.34 : lobe.x);
     const shape = target[i] ?? (target[i] = {});
-    shape.x = x + cos * offset;
-    shape.z = z - sin * offset;
-    shape.y = base + scale * lobe.y * (rear ? .992 : 1);
+    const segments = body.body?.joints;
+    const front = lobe.part === 'head', gaster = lobe.part === 'gaster';
+    const flexYaw = segments ? front ? segments.headYaw : gaster ? segments.waistYaw + segments.postYaw + segments.gasterYaw : 0 : 0;
+    const flexPitch = segments ? front ? segments.headPitch + .19
+      : gaster ? segments.waistPitch + segments.postPitch + segments.gasterPitch - .14 : 0 : 0;
+    const pivot = front ? .585 : gaster ? -.86 : offset;
+    const arm = offset - pivot;
+    const turnCos = flexYaw ? Math.cos(heading + flexYaw) : cos;
+    const turnSin = flexYaw ? Math.sin(heading + flexYaw) : sin;
+    const reach = arm * Math.cos(flexPitch);
+    shape.x = x + cos * pivot + turnCos * reach;
+    shape.z = z - sin * pivot - turnSin * reach;
+    shape.y = base + scale * lobe.y * (rear ? .992 : 1) + arm * Math.sin(flexPitch);
     shape.a = lobe.a * scale * (rear ? 1.34 : 1);
     shape.b = lobe.b * scale * (rear ? 1.19 : 1);
     shape.c = lobe.c * scale * (rear ? 1.28 : 1);
-    shape.cos = cos;
-    shape.sin = sin;
+    shape.cos = turnCos;
+    shape.sin = turnSin;
   }
   return target;
 }

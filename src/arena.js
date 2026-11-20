@@ -40,7 +40,7 @@ export class ColonyArena {
     this.renderer.shadowMap.autoUpdate = false;
     const canvas = this.renderer.domElement;
     canvas.tabIndex = 0;
-    canvas.setAttribute('aria-label', 'Interactive 3D colony world');
+    canvas.setAttribute('aria-label', 'Interactive 3D ant world');
     host.replaceChildren(canvas);
     this.orbit = new OrbitControls(this.camera, canvas);
     this.orbit.enableDamping = true;
@@ -122,6 +122,11 @@ export class ColonyArena {
       cursor.set((event.clientX - rect.left) / rect.width * 2 - 1, 1 - (event.clientY - rect.top) / rect.height * 2);
       this.camera.updateMatrixWorld();
       ray.setFromCamera(cursor, this.camera);
+      if (this.placeOnGround) {
+        const point = this.findGround(ray.ray);
+        if (point) this.placeOnGround(point);
+        return;
+      }
       const id = this.objects.pick(ray);
       if (id === null) return;
       this.flags.selectedId = id;
@@ -129,6 +134,23 @@ export class ColonyArena {
       this.onPick?.(id);
       this.dirty = true;
     });
+  }
+
+  findGround(ray) {
+    const ground = this.colony.map.height;
+    const { origin, direction } = ray;
+    if (direction.y >= -.008) return null;
+    let distance = -origin.y / direction.y;
+    for (let i = 0; i < 6; i++) {
+      distance = (ground(origin.x + direction.x * distance, origin.z + direction.z * distance) - origin.y) / direction.y;
+    }
+    if (distance < 0 || distance > this.camera.far) return null;
+    return ray.at(distance, new THREE.Vector3());
+  }
+
+  switchSimulation(simulation) {
+    this.colony = simulation;
+    this.prepareRun();
   }
 
   inspect(id) {
@@ -171,12 +193,12 @@ export class ColonyArena {
   }
 
   prepareRun() {
-    this.workerId = 1;
+    this.workerId = this.colony.workers[0]?.id ?? 1;
     this.flags.selectedId = null;
     this.accumulated = 0;
     this.brain?.reset();
     this.onBrain?.();
-    this.setView('nest');
+    this.setView(this.colony.mode === 'scratch' ? 'explore' : this.colony.mode === 'individual' ? 'worker' : 'nest');
     this.objects.setWorld(this.colony.map, this.orbit.target);
     this.presentWorld = this.colony.map;
     this.onStats?.();
@@ -225,10 +247,15 @@ export class ColonyArena {
     this.lastStamp = stamp;
     if (!this.flags.paused) {
       this.accumulated += dt * this.flags.rate;
+      // Bound the backlog after slow frames so a large sandbox stays interactive.
+      const trainingLab = !!this.colony.mode;
+      const stepDeadline = trainingLab ? performance.now() + 10 : Infinity;
+      if (trainingLab) this.accumulated = Math.min(this.accumulated, .8);
       while (this.accumulated + 1e-7 >= colonyStep) {
         this.accumulated -= colonyStep;
         this.colony.step();
         if (this.presentWorld !== this.colony.map) this.prepareRun();
+        if (trainingLab && performance.now() >= stepDeadline) break;
       }
       this.dirty = true;
     }
@@ -257,7 +284,7 @@ export class ColonyArena {
     const elapsed = this.lastFrame ? (stamp - this.lastFrame) / 1000 : 0;
     this.lastFrame = stamp;
     this.objects.update(this.colony, this.orbit.target, this.selected,
-      this.flags.paused ? 0 : elapsed * this.flags.rate, this.flags, Math.max(0, this.accumulated / colonyStep),
+      this.flags.paused ? 0 : elapsed * this.flags.rate, this.flags, THREE.MathUtils.clamp(this.accumulated / colonyStep, 0, 1),
       this.camera, this.flags.paused ? 0 : Math.min(.12, elapsed));
     if (!this.software && (!this.lastShadow || stamp - this.lastShadow > (this.lowPower ? 95 : 65))) {
       const target = this.orbit.target;
@@ -270,7 +297,7 @@ export class ColonyArena {
       this.renderer.shadowMap.needsUpdate = true;
       this.lastShadow = stamp;
     }
-    this.renderer.render(this.scene, this.camera, this.objects.queenMotion);
+    this.renderer.render(this.scene, this.camera, this.objects.queenMotion, !this.colony.mode);
     this.dirty = false;
   }
 }

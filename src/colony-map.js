@@ -15,6 +15,7 @@ export class ColonyMap {
     this.seed = seed;
     this.settings = settings;
     this.chunks = new Map();
+    this.resourceVersion = 0;
     const phase = seeded(seed || 1)() * Math.PI * 2;
     this.height = (x, z) => {
       const flat = Math.min(1, Math.hypot(x, z) / 11) ** 2;
@@ -34,7 +35,7 @@ export class ColonyMap {
       kind, x, z, units: capacity, capacity, lastRefill: 0,
     });
     const resources = [];
-    if (x === 0 && z === 0) {
+    if (this.settings.starterResources !== false && x === 0 && z === 0) {
       // One discoverable pair prevents the opening from depending on a lucky seed.
       const angle = .18 + random() * .55;
       resources.push(patch('food', Math.cos(angle) * 7.4, -Math.sin(angle) * 7.4, 34));

@@ -1,5 +1,7 @@
 import './style.css';
 import { ColonyArena } from './arena.js';
+import { ScratchLab } from './scratch-lab.js';
+import { labControls } from './lab-controls.js';
 import { installBrainPanel } from './brain-panel.js';
 import { groomingActions, groomZones } from './grooming.js';
 
@@ -74,6 +76,12 @@ const percent = value => `${Math.round(value * 100)}%`;
 
 function controls(arena) {
   const { colony } = arena;
+  const labUI = labControls(arena);
+  const launch = $('launch-menu');
+  const choices = [...launch.querySelectorAll('[data-mode]')];
+  const simulations = new Map([['colony', colony]]);
+  let activeMode;
+  let wasPaused = true;
   const play = $('play');
   const drawer = $('settings-panel');
   const settingsButton = $('settings-button');
@@ -102,7 +110,7 @@ function controls(arena) {
   $('quality').disabled = arena.software;
 
   function refreshBrain() {
-    const show = !drawer.hidden && brainDetails.open;
+    const show = activeMode === 'colony' && !drawer.hidden && brainDetails.open;
     arena.enableBrain(show);
     if (show && !brainReady) {
       installBrainPanel(arena);
@@ -110,11 +118,11 @@ function controls(arena) {
     }
   }
 
-  function openSettings(open) {
+  function openSettings(open, returnFocus = true) {
     drawer.hidden = !open;
     settingsButton.setAttribute('aria-expanded', open);
     refreshBrain();
-    if (!open) settingsButton.focus();
+    if (!open && returnFocus) settingsButton.focus();
   }
   function closeCard() {
     arena.flags.selectedId = null;
@@ -124,12 +132,14 @@ function controls(arena) {
   function updateCard() {
     const id = arena.flags.selectedId;
     if (id === null) { card.hidden = true; return; }
-    const agent = id === 0 ? colony.queen : colony.workers.find(worker => worker.id === id);
+    const simulation = arena.colony;
+    const agent = id === 0 ? simulation.queen : simulation.workers.find(worker => worker.id === id);
     if (!agent || agent.living === false) { closeCard(); return; }
     const queen = !!agent.queen;
-    text('ant-title', queen ? 'Queen' : 'Worker ' + id);
+    const labAnt = !!agent.body;
+    text('ant-title', queen ? 'Queen' : (labAnt ? 'Ant ' : 'Worker ') + id);
     text('ant-activity', queen ? 'Nest queen' : agent.grooming ? 'Cleaning · ' + groomZones[agent.grooming.key].name
-      : agent.lift > .15 ? 'Climbing' : agent.state);
+      : !labAnt && agent.lift > .15 ? 'Climbing' : agent.state);
     text('ant-food', percent(agent.food));
     text('ant-water', percent(agent.water));
     const seconds = Math.floor(queen ? colony.time : agent.age);
@@ -138,19 +148,21 @@ function controls(arena) {
     text('ant-generation', queen ? colony.stats.eggs : agent.generation);
     text('ant-contact-label', queen ? 'Deliveries' : 'Last contact');
     text('ant-contact', queen ? colony.stats.delivered : agent.lastTouch?.kind ?? '—');
-    text('ant-groomed-label', queen ? 'Brood' : 'Last cleaned');
-    text('ant-groomed', queen ? colony.brood.length : groomZones[agent.lastCleaned]?.name ?? '—');
-    dirt.hidden = queen;
-    $('open-ant-brain').hidden = queen;
-    text('follow-ant', queen ? 'Focus nest' : 'Follow worker');
-    if (!queen && dirt.open) for (const [key, { meter, readout }] of Object.entries(indicators)) {
+    text('ant-groomed-label', queen ? 'Brood' : labAnt ? 'Motor trials kept' : 'Last cleaned');
+    text('ant-groomed', queen ? colony.brood.length : labAnt ? agent.controller.updates : groomZones[agent.lastCleaned]?.name ?? '—');
+    dirt.hidden = queen || labAnt;
+    $('open-ant-brain').hidden = queen || labAnt;
+    $('save-ant-weights').hidden = !labAnt;
+    text('follow-ant', queen ? 'Focus nest' : labAnt ? 'Follow ant' : 'Follow worker');
+    if (!dirt.hidden && dirt.open) for (const [key, { meter, readout }] of Object.entries(indicators)) {
       const value = agent.grime[key];
       meter.value = value;
       readout.textContent = percent(value);
     }
   }
   arena.onPick = () => {
-    if (!drawer.hidden) openSettings(false);
+    if (!drawer.hidden) openSettings(false, false);
+    if (labUI.visible) labUI.open(false);
     dirt.open = false;
     updateCard();
     card.hidden = false;
@@ -168,11 +180,19 @@ function controls(arena) {
     openSettings(true);
     brainDetails.querySelector('summary').scrollIntoView({ block: 'nearest' });
   });
-  settingsButton.addEventListener('click', () => openSettings(drawer.hidden));
+  settingsButton.addEventListener('click', () => {
+    if (arena.colony.mode) {
+      const opening = !labUI.visible;
+      if (opening) closeCard();
+      labUI.open(opening);
+    } else openSettings(drawer.hidden);
+  });
   $('settings-close').addEventListener('click', () => openSettings(false));
   document.addEventListener('keydown', event => {
-    if (event.key !== 'Escape') return;
-    if (!drawer.hidden) openSettings(false);
+    if (event.key !== 'Escape' || launch.open) return;
+    if (arena.placeOnGround) labUI.end();
+    else if (labUI.visible) labUI.open(false);
+    else if (!drawer.hidden) openSettings(false);
     else if (!card.hidden) closeCard();
   });
   brainDetails.addEventListener('toggle', refreshBrain);
@@ -210,9 +230,24 @@ function controls(arena) {
   for (const view of views) view.addEventListener('click', () => { arena.setView(view.dataset.view); updateStats(); });
 
   function updateStats() {
-    const { queen, stats, signals } = colony;
-    const seconds = Math.floor(colony.time);
+    const seconds = Math.floor(arena.colony.time);
     text('sim-time', `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`);
+    $('world').dataset.paused = arena.flags.paused;
+    play.setAttribute('aria-label', arena.flags.paused ? 'Play simulation' : 'Pause simulation');
+    const glyph = play.querySelector('i');
+    const iconName = arena.flags.paused ? 'play' : 'pause';
+    if (glyph.dataset.icon !== iconName) {
+      glyph.dataset.icon = iconName;
+      glyph.innerHTML = icon(iconName);
+    }
+    for (const view of views) view.setAttribute('aria-pressed', arena.mode === view.dataset.view);
+    updateCard();
+    if (arena.colony.mode) {
+      text('worker-state', arena.selected?.state ?? 'Empty habitat');
+      labUI.stats(text);
+      return;
+    }
+    const { queen, stats, signals } = colony;
     text('run-label', `Run ${colony.run}`);
     text('adults', colony.workers.length);
     text('brood-total', colony.brood.length);
@@ -226,16 +261,6 @@ function controls(arena) {
     const current = arena.selected;
     text('worker-state', current?.grooming ? 'Cleaning ' + groomZones[current.grooming.key].name.toLowerCase()
       : current?.state ?? 'Colony stopped');
-    updateCard();
-    $('world').dataset.paused = arena.flags.paused;
-    play.setAttribute('aria-label', arena.flags.paused ? 'Play simulation' : 'Pause simulation');
-    const glyph = play.querySelector('i');
-    const iconName = arena.flags.paused ? 'play' : 'pause';
-    if (glyph.dataset.icon !== iconName) {
-      glyph.dataset.icon = iconName;
-      glyph.innerHTML = icon(iconName);
-    }
-    for (const view of views) view.setAttribute('aria-pressed', arena.mode === view.dataset.view);
     const failure = $('failure');
     failure.hidden = !colony.failed;
     text('failure', colony.failed ? `${colony.failed} · ${colony.settings.restart ? 'Restarting' : 'Run ended'}` : '');
@@ -271,8 +296,51 @@ function controls(arena) {
       storage(championKey, colony.best);
     }
   }
+  function showMenu() {
+    wasPaused = activeMode ? arena.flags.paused : reduced.matches;
+    arena.flags.paused = true;
+    labUI.end();
+    $('resume-mode').hidden = !activeMode;
+    launch.showModal();
+    updateStats();
+  }
+
+  function choose(mode) {
+    if (activeMode && activeMode !== mode) simulations.get(activeMode).paused = wasPaused;
+    if (!simulations.has(mode)) simulations.set(mode, new ScratchLab(mode));
+    const next = simulations.get(mode);
+    const changed = mode !== activeMode;
+    activeMode = mode;
+    if (changed) {
+      openSettings(false, false);
+      closeCard();
+      arena.switchSimulation(next);
+      labUI.configure();
+      $('colony-hud').hidden = !!next.mode;
+      $('lab-hud').hidden = !next.mode;
+      $('failure').hidden = true;
+      $('world').dataset.simulation = mode;
+      text('nest-view', next.mode ? 'Center' : 'Nest');
+      text('worker-view', next.mode ? 'Ant' : 'Worker');
+      settingsButton.querySelector('span').textContent = next.mode ? 'Training tools' : 'Settings';
+      settingsButton.setAttribute('aria-controls', next.mode ? 'lab-panel' : 'settings-panel');
+      for (const choice of choices) choice.setAttribute('aria-current', String(choice.dataset.mode === mode));
+    }
+    arena.flags.paused = changed ? next.paused ?? reduced.matches : wasPaused;
+    launch.close();
+    updateStats();
+    $('mode-menu').focus();
+  }
+
+  for (const choice of choices) choice.addEventListener('click', () => choose(choice.dataset.mode));
+  $('mode-menu').addEventListener('click', showMenu);
+  $('resume-mode').addEventListener('click', () => choose(activeMode));
+  launch.addEventListener('cancel', event => {
+    event.preventDefault();
+    if (activeMode) choose(activeMode);
+  });
   arena.onStats = updateStats;
-  updateStats();
+  showMenu();
 }
 
 const host = $('canvas-host');

@@ -11,7 +11,7 @@
   <title>Fire Ant Lab | AI Ant Brain Simulator</title>
 </head>
 <body>
-  <main id="world" aria-label="Fire ant colony">
+  <main id="world" aria-label="Fire Ant Lab workspace">
     <div id="canvas-host"><p>Preparing the colony…</p></div>
     <header class="toolbar">
       <div class="brand">
@@ -19,11 +19,12 @@
         <div><h1>Fire Ant Lab</h1><span id="run-label">Run 1</span><span id="render-mode" hidden> · Compatibility</span></div>
       </div>
       <div class="toolbar-actions">
+        <button id="mode-menu" type="button" aria-haspopup="dialog">Modes</button>
         <button id="install" type="button" hidden>Install</button>
         <button id="settings-button" type="button" aria-expanded="false" aria-controls="settings-panel"><i data-icon="settings"></i><span>Settings</span></button>
       </div>
     </header>
-    <section class="hud" aria-label="Colony totals">
+    <section id="colony-hud" class="hud" aria-label="Colony totals">
       <div class="census"><span>Workers <b id="adults">1</b></span><span>Brood <b id="brood-total">0</b></span></div>
       <div class="queen-status" aria-label="Queen reserves">
         <span>Queen</span>
@@ -31,6 +32,58 @@
         <div class="reserve"><span><i class="resource water"></i>Water <b id="queen-water-value">94%</b></span><progress id="queen-water" aria-label="Queen water" max="1" value=".94"></progress></div>
       </div>
     </section>
+
+    <section id="lab-hud" class="hud lab-hud" aria-label="Training totals" hidden>
+      <div class="census"><span>Ants <b id="lab-ants">0</b></span><span>Accepted motor trials <b id="lab-updates">0</b></span></div>
+      <span id="lab-population-note">No ants yet</span>
+    </section>
+    <div id="lab-placement" class="placement-bar" hidden><strong id="placement-label"></strong><button id="end-placement" type="button">Done</button></div>
+    <aside id="lab-panel" class="drawer" aria-label="Training tools" hidden>
+      <div class="drawer-top"><h2>Training tools</h2><button id="close-lab" class="icon" type="button" aria-label="Close training tools"><i data-icon="close"></i></button></div>
+      <details open>
+        <summary>Build the habitat</summary>
+        <div class="drawer-content">
+          <label for="placement-tool">Place or remove</label><select id="placement-tool"><option value="food">Food pile</option><option value="water">Water pool</option><option value="spawn">Ants</option><option value="erase">Remove resource</option></select>
+          <label for="placement-quantity" id="quantity-label">Resource units per pile</label><input id="placement-quantity" type="number" min="1" max="1000" value="25">
+          <label for="placement-genome" id="genome-label" hidden>Starting weights</label><select id="placement-genome" hidden><option value="">Fresh · zero weights</option></select>
+          <button type="button" id="begin-placement" class="wide">Place on ground</button>
+          <button type="button" id="place-center" class="wide">Place at camera center</button>
+          <p class="hint">Drag to orbit. Switch to Explore to pan across the habitat. Tap an ant to inspect its training.</p>
+        </div>
+      </details>
+      <details>
+        <summary>Learning &amp; reproduction</summary>
+        <div class="drawer-content">
+          <label for="lab-ant-picker">Inspect ant</label><select id="lab-ant-picker"></select>
+          <label for="lab-learning">Learn during this run</label><input id="lab-learning" type="checkbox" checked>
+          <label for="lab-needs">Food and water drain over time</label><input id="lab-needs" type="checkbox" checked>
+          <label for="lab-renewal">Refill resources <small>Units per second</small></label><input id="lab-renewal" type="number" min="0" max="5" step=".05" value="0">
+          <label for="lab-reproduce">Enable reproduction <small>Both parents need ≥75% food and ≥75% water</small></label><input id="lab-reproduce" type="checkbox">
+          <label for="lab-joints">Show joint markers</label><input id="lab-joints" type="checkbox">
+          <label for="lab-feet">Show foot contacts</label><input id="lab-feet" type="checkbox">
+          <dl class="ledger">
+            <div><dt>Offspring</dt><dd id="lab-born">0</dd></div>
+            <div><dt>Food consumed</dt><dd id="lab-fed">0.00</dd></div>
+            <div><dt>Water consumed</dt><dd id="lab-drank">0.00</dd></div>
+            <div><dt>Antenna contacts</dt><dd id="lab-contact-count">0</dd></div>
+            <div><dt>Resources shared</dt><dd id="lab-shared">0.00</dd></div>
+          </dl>
+          <button type="button" id="reset-lab" class="wide">Reset this habitat…</button>
+        </div>
+      </details>
+      <details>
+        <summary>Saved weights</summary>
+        <div class="drawer-content">
+          <label for="weights-bank">Saved on this device</label><select id="weights-bank"></select>
+          <button type="button" id="import-genome" class="wide">Import weight file</button>
+          <input id="genome-file" type="file" accept=".json,application/json" hidden>
+          <button type="button" id="export-genome" class="wide">Download selected weights</button>
+          <button type="button" id="delete-genome" class="wide">Remove saved weights…</button>
+          <p class="hint">Tap an ant and choose Save weights to add it to this list.</p>
+        </div>
+      </details>
+    </aside>
+    <p id="lab-notice" class="lab-notice" role="status" hidden></p>
 
     <p id="failure" class="failure" role="status" hidden></p>
     <section class="observation" aria-label="Worker status">
@@ -76,6 +129,7 @@
       <div class="ant-actions">
         <button type="button" id="follow-ant">Follow worker</button>
         <button type="button" id="open-ant-brain">Brain details</button>
+        <button type="button" id="save-ant-weights" hidden>Save weights</button>
       </div>
     </aside>
 
@@ -157,6 +211,18 @@
       <p class="drawer-footer">Egg → larva → pupa → adult</p>
     </aside>
   </main>
+  <dialog id="launch-menu" class="launch-menu" aria-labelledby="launch-heading">
+    <div class="launch-header">
+      <img src="./icons/ant-192.png" alt="" width="66" height="66">
+      <div><h2 id="launch-heading">Fire Ant Lab</h2><p>Choose a simulation</p></div>
+    </div>
+    <div class="mode-options">
+      <button type="button" data-mode="colony"><span class="mode-sketch" aria-hidden="true">⬡</span><span><strong>Colony</strong><small>Watch workers care for a queen and raise brood.</small></span><span aria-hidden="true">›</span></button>
+      <button type="button" data-mode="individual"><span class="mode-sketch" aria-hidden="true">◉</span><span><strong>Individual</strong><small>Follow one ant as it practices in a stocked habitat.</small></span><span aria-hidden="true">›</span></button>
+      <button type="button" data-mode="scratch"><span class="mode-sketch" aria-hidden="true">✦</span><span><strong>From Scratch</strong><small>Place resources and ants. Train from zero and pass on learned weights.</small></span><span aria-hidden="true">›</span></button>
+    </div>
+    <button type="button" class="mode-back" id="resume-mode" hidden>Resume current simulation</button>
+  </dialog>
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

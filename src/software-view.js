@@ -345,7 +345,7 @@ export class SoftwareView {
     ctx.restore();
   }
 
-  render(scene, camera, motion) {
+  render(scene, camera, motion, showNest = true) {
     const ctx = this.context;
     if (!motion) return;
     scene.updateMatrixWorld(true);
@@ -356,7 +356,7 @@ export class SoftwareView {
     this.background(camera, motion);
     const shapes = this.sceneShapes(scene, camera);
     ctx.fillStyle = '#1d120e36';
-    for (const foot of motion.legs) {
+    for (const foot of showNest ? motion.legs : []) {
       if (foot.swinging) continue;
       center.set(foot.x, terrainHeight(motion.terrain, foot.x, foot.z), foot.z).applyMatrix4(transform);
       const [x, y] = this.screen(center);
