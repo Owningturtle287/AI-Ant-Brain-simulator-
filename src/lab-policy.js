@@ -57,7 +57,9 @@ export class JointPolicy {
     // broader coordination trials to get out of a stationary pose.
     const changes = this.random() < .20 ? 34 : 11;
     for (let i = 0; i < changes; i++) {
-      const index = Math.floor(this.random() * (this.random() < .93 ? 6 * 8 * bases : motorSize + 2 * senseSize));
+      const range = this.random();
+      const index = range < .93 ? Math.floor(this.random() * legChannels * bases)
+        : range < .99 ? Math.floor(this.random() * (motorSize + 2 * senseSize)) : weightCount - 1;
       if (this.trial[index]) continue;
       this.trial[index] = (2 * this.random() - 1) * amplitude;
       this.changes.push(index);
@@ -78,7 +80,8 @@ export class JointPolicy {
       for (let i = 0; i < senses.length; i++) sum += (this.weights[start + i] + this.trial[start + i]) * senses[i];
       return sum;
     };
-    this.phase = (this.phase + dt * (8.8 + 6.5 * Math.tanh(drive(0)))) % (2 * Math.PI);
+    const clock = this.weights[weightCount - 1] + this.trial[weightCount - 1];
+    this.phase = (this.phase + dt * (8.8 + 6.5 * Math.tanh(drive(0) + clock))) % (2 * Math.PI);
     const sine = Math.sin(this.phase), cosine = Math.cos(this.phase);
     const bend = Math.tanh(drive(1)) * .34;
     for (let i = 0; i < motorChannels; i++) {

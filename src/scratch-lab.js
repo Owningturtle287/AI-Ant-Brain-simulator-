@@ -225,7 +225,11 @@ export class ScratchLab {
   }
 
   step() {
-    for (const ant of this.workers) ant.previous = { x: ant.x, z: ant.z, heading: ant.heading, lift: ant.lift };
+    for (const ant of this.workers) {
+      const { body, x, z, heading, lift } = ant;
+      ant.previous = { x, z, heading, lift, height: body.height, pitch: body.pitch, roll: body.roll,
+        jaw: body.jaw, joints: { ...body.joints }, feet: body.legs.map(leg => leg.points) };
+    }
     for (let i = 0; i < 2; i++) {
       this.time += step;
       for (const ant of this.workers) if (ant.alive) this.experience(ant, step);

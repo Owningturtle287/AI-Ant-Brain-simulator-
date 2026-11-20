@@ -283,12 +283,12 @@ export class ColonyScene {
     this.queenPivot.visible = colony.queen.living;
     this.visualShells.clear();
     for (const worker of colony.workers) {
-      const previous = worker.body ? worker : worker.previous;
+      const previous = worker.previous;
       const x = THREE.MathUtils.lerp(previous.x, worker.x, alpha);
       const z = THREE.MathUtils.lerp(previous.z, worker.z, alpha);
       const heading = THREE.MathUtils.lerp(previous.heading, worker.heading, alpha);
       const lift = THREE.MathUtils.lerp(previous.lift ?? 0, worker.lift, alpha);
-      this.visualShells.set(worker, { x, z, heading, lift,
+      this.visualShells.set(worker, { x, z, heading, lift, alpha,
         lobes: bodyShells(worker, this.world.height, x, z, heading, lift) });
     }
     this.visualShells.set(colony.queen, { lobes: bodyShells(colony.queen, this.world.height) });
@@ -360,6 +360,30 @@ export class ColonyScene {
     for (let i = brood.length; i < this.brood.length; i++) this.brood[i].visible = false;
   }
 
+  blendLabPose(worker, entry, alpha) {
+    const { body, previous } = worker;
+    if (!previous.feet) return body;
+    const pose = entry.labPose ?? (entry.labPose = {
+      joints: {}, legs: body.legs.map(() => ({ points: Array.from({ length: 10 }, () => new THREE.Vector3()) })),
+    });
+    const mix = THREE.MathUtils.lerp;
+    for (const key of ['height', 'pitch', 'roll', 'jaw']) pose[key] = mix(previous[key], body[key], alpha);
+    for (const key of Object.keys(body.joints)) pose.joints[key] = mix(previous.joints[key], body.joints[key], alpha);
+    pose.antennae = body.antennae;
+    pose.clock = body.clock;
+    for (const [i, leg] of body.legs.entries()) {
+      const rendered = pose.legs[i];
+      rendered.type = leg.type;
+      rendered.side = leg.side;
+      rendered.ground = leg.ground;
+      for (const [j, point] of rendered.points.entries()) {
+        const start = previous.feet[i][j], end = leg.points[j];
+        point.set(mix(start.x, end.x, alpha), mix(start.y, end.y, alpha), mix(start.z, end.z, alpha));
+      }
+    }
+    return pose;
+  }
+
   updateWorkers(colony, selected, dt, flags) {
     const visible = colony.workers.filter(worker => {
       workerBounds.center.set(worker.x, .60, worker.z);
@@ -399,7 +423,7 @@ export class ColonyScene {
         });
       }
       const obstacles = this.obstacles(colony, worker);
-      const direct = worker.body;
+      const direct = worker.body ? this.blendLabPose(worker, entry, pose.alpha) : null;
       const rigMotion = direct ? { x: pose.x, z: pose.z, heading: pose.heading, clock: direct.clock, legs: direct.legs,
         joints: direct.joints, bodyPose: () => direct, terrain: this.world.height } : motion;
       rig.update(rigMotion, flags.joints && selected === worker, flags.contacts && selected === worker,
